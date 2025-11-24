@@ -10,7 +10,7 @@ import db_manager
 app = Flask(__name__)
 app.secret_key = SECRET_KEY 
 
-# 🛠️ --- FILTROS PERSONALIZADOS DE JINJA (SOLUCIÓN ERROR 1) ---
+# 🛠️ --- FILTROS PERSONALIZADOS DE JINJA ---
 def format_thousand_separator(value):
     """
     Filtro para añadir separador de miles (punto) en Jinja.
@@ -77,7 +77,7 @@ def login():
             flash("Su cuenta ha sido deshabilitada. Contacte al administrador.", 'danger')
         else:
             flash('Usuario o contraseña incorrectos.', 'danger')
-    
+        
     return render_template('login.html')
 
 @app.route('/logout')
@@ -97,18 +97,17 @@ def pilot_form():
         
     pilot_data = db_manager.load_pilot_data(session['user_id'])
     
-    # Validación clave: si el piloto no tiene vehículo, no puede reportar
     if not pilot_data or not pilot_data.get('plate'):
         return render_template('pilot_form.html', error="No tiene un vehículo asignado. Contacte a su administrador.", pilot_data=None)
 
     if request.method == 'POST':
         try:
-            # 1. Recoger datos generales y los nuevos campos del PDF (Asumimos que están en pilot_form.html)
+            # 1. Recoger datos generales
             km_actual = float(request.form['km_actual'])
             observations = request.form.get('observations', '')
             signature_confirmation = request.form.get('signature_confirmation')
             
-            # Recoger los nuevos campos del PDF (Se usan .get() para evitar errores si no están en el HTML)
+            # Recoger los nuevos campos del PDF
             promo_marca = request.form.get('promo_marca', '')
             fecha_inicio = request.form.get('fecha_inicio', '')
             fecha_finalizacion = request.form.get('fecha_finalizacion', '')
@@ -125,7 +124,7 @@ def pilot_form():
                 'brand': pilot_data['brand'],
                 'model': pilot_data['model'],
                 'km_actual': km_actual,
-                # Se incluyen los nuevos datos para guardarlos en header_data si se modifica db_manager.save_report_web
+                # Se incluyen los nuevos datos
                 'promo_marca': promo_marca,
                 'fecha_inicio': fecha_inicio,
                 'fecha_finalizacion': fecha_finalizacion,
@@ -140,7 +139,6 @@ def pilot_form():
             checklist_results = {}
             for category, items in CHECKLIST_ITEMS:
                 for item in items:
-                    # Normalizamos el nombre del ítem para que coincida con el HTML
                     form_key = 'check_' + item.replace(' ', '_').replace('/', '_').replace('(', '').replace(')', '').replace(',', '').replace('-', '').replace('.', '')
                     
                     if form_key in request.form:
@@ -240,7 +238,7 @@ def manage_vehicles_web():
             elif action == 'delete':
                 db_manager.manage_vehicle(action, plate=plate)
                 flash('Vehículo eliminado exitosamente.', 'success')
-        
+            
         except ValueError as e:
             flash(f"Error: {e}", 'danger')
         except Exception as e:
@@ -265,7 +263,7 @@ def review_reports_web():
     pilot_id = int(pilot_id_str) if pilot_id_str and pilot_id_str.isdigit() else None
     plate = request.args.get('plate')
     
-    # Guardar los filtros para pasarlos de vuelta a la plantilla y mantener la selección
+    # Guardar los filtros para pasarlos de vuelta a la plantilla
     filters = {
         'start_date': start_date if start_date else '',
         'end_date': end_date if end_date else '',
@@ -285,15 +283,15 @@ def review_reports_web():
         vehicles = []
         
     # 3. Serializar reportes para el JavaScript (reports_json)
-    reports_json = json.dumps(reports) 
+    reports_json = json.dumps(reports, default=str) # default=str es crucial para fechas/horas de psycopg2
     
     # 4. Renderizar la plantilla
     return render_template('admin_reports.html', 
-                           reports=reports, 
-                           pilots=pilots, 
-                           vehicles=vehicles,
-                           filters=filters,
-                           reports_json=reports_json)
+                            reports=reports, 
+                            pilots=pilots, 
+                            vehicles=vehicles,
+                            filters=filters,
+                            reports_json=reports_json)
 
 
 @app.route('/admin/reports/delete/<int:report_id>', methods=['POST'])
@@ -301,7 +299,6 @@ def review_reports_web():
 def delete_report_web(report_id):
     """
     Ruta para eliminar un reporte específico por su ID.
-    ESTA RUTA SOLUCIONA EL BUILDERROR.
     """
     try:
         db_manager.delete_report(report_id)
@@ -309,9 +306,6 @@ def delete_report_web(report_id):
     except Exception as e:
         flash(f'Error al eliminar el reporte: {e}', 'danger')
         
-    # Redirigir a la página de reportes. Si quieres mantener los filtros
-    # activos después de la eliminación, tu formulario de eliminación
-    # en admin_reports.html debe incluir los filtros como campos ocultos.
     return redirect(url_for('review_reports_web'))
 
 
@@ -338,7 +332,7 @@ def export_reports():
     output = io.StringIO()
     writer = csv.writer(output)
     
-    # Encabezados del CSV (Asegúrate de que coincidan con las claves devueltas por get_filtered_reports)
+    # Encabezados del CSV
     writer.writerow([
         'ID_Reporte', 'Fecha_Reporte', 'Piloto', 'ID_Piloto', 'Placa_Vehiculo', 
         'KM_Actual', 'Observaciones', 'Header_JSON', 'Checklist_JSON'
@@ -346,7 +340,7 @@ def export_reports():
 
     # 4. Datos 
     for report in reports:
-        # Asegúrate de que las claves existan en los diccionarios de reportes
+        # Asegúrate de que las claves existan y convierte JSON a string para el CSV
         row = [
             report['id'],
             report['report_date'], 
@@ -355,8 +349,8 @@ def export_reports():
             report['vehicle_plate'], 
             report['km_actual'],
             report['observations'], 
-            json.dumps(report['header_data']), 
-            json.dumps(report['checklist_data'])
+            json.dumps(report['header_data'], default=str), # Usar default=str
+            json.dumps(report['checklist_data'], default=str)
         ]
         writer.writerow(row)
 
@@ -366,8 +360,17 @@ def export_reports():
     response.headers['Content-Disposition'] = 'attachment; filename=reportes_inspeccion.csv'
     return response
 
-# --- Ejecución de la App ---
-if __name__ == '__main__':
-    # Asegúrate de que la DB se inicialice antes de correr la app
+# --- Ejecución de la App (¡CORRECCIÓN VERCEL!) ---
+
+# Asegúrate de que la DB se inicialice antes de correr la app.
+# Esta línea debe estar FUERA del bloque 'if __name__ == "__main__":' para que Vercel la ejecute.
+try:
     db_manager.inicializar_db()
-    app.run(debug=True)
+except ConnectionError as e:
+    # Esto manejaría un error de conexión inicial si Vercel no tiene las variables correctas
+    print(f"ERROR CRÍTICO DE CONEXIÓN EN INICIALIZACIÓN: {e}")
+    # Nota: El error HTTP 500 será generado si la conexión falla aquí.
+    pass
+
+# El objeto 'app' ya está disponible globalmente y Vercel lo detectará.
+# El bloque 'if __name__ == "__main__":' ha sido eliminado para la compatibilidad con Vercel.
