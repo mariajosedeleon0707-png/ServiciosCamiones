@@ -1,388 +1,363 @@
-# db_manager.py (VERSION ARREGLADA PARA SUPABASE/POSTGRESQL)
+# db_manager.py (Versión PostgreSQL / Supabase)
 
 import os
-import json
 import datetime
-import pandas as pd
-import psycopg2
-import psycopg2.extras
-from psycopg2 import sql
+import json
 from werkzeug.security import generate_password_hash, check_password_hash
 
-# --- Configuración de Conexión ---
+# Librerías de PostgreSQL
+try:
+    import psycopg2
+    from psycopg2.extras import RealDictCursor
+    POSTGRES_ACTIVE = True
+except ImportError:
+    # Esto ocurre si corres localmente sin instalar psycopg2-binary
+    print("Advertencia: psycopg2 no está instalado. No se puede conectar a PostgreSQL.")
+    POSTGRES_ACTIVE = False
+
+# Librería para la función de reportes filtrados (mantener si se usa en get_filtered_reports)
+import pandas as pd 
+
+# --- CONFIGURACIÓN PARA POSTGRESQL (SUPABASE) ---
+# Los valores se leen de las Variables de Entorno de Vercel
+DB_HOST = os.environ.get('DB_HOST')
+DB_NAME = os.environ.get('DB_NAME')
+DB_USER = os.environ.get('DB_USER')
+DB_PASSWORD = os.environ.get('DB_PASSWORD')
+DB_PORT = os.environ.get('DB_PORT', '5432')
+
+# --- Funciones de Conexión ---
 
 def get_db_connection():
-    """
-    Crea y devuelve un objeto de conexión a PostgreSQL.
-    Lee las credenciales de las variables de entorno de Vercel.
-    """
-    # ⚠️ Las variables de entorno DEBEN estar configuradas en Vercel (ver instrucciones abajo)
-    return psycopg2.connect(
-        host=os.environ.get('DB_HOST'),
-        database=os.environ.get('DB_NAME', 'postgres'),
-        user=os.environ.get('DB_USER'),
-        password=os.environ.get('DB_PASSWORD'),
-        port=os.environ.get('DB_PORT', '5432')
-    )
+    if not POSTGRES_ACTIVE:
+        raise Exception("El módulo psycopg2 no está disponible o la importación falló.")
+    
+    try:
+        conn = psycopg2.connect(
+            host=DB_HOST,
+            database=DB_NAME,
+            user=DB_USER,
+            password=DB_PASSWORD,
+            port=DB_PORT
+        )
+        return conn
+    except psycopg2.OperationalError as e:
+        # Mensaje de error útil si fallan las variables de Vercel
+        print(f"Error de conexión a PostgreSQL. Revise las Variables de Entorno de Vercel/Supabase: {e}")
+        raise ConnectionError(f"No se pudo conectar a la base de datos: {e}")
 
-# --- Funciones de Inicialización ---
 
 def inicializar_db():
-    conn = None
-    try:
-        conn = get_db_connection()
-        with conn.cursor() as c:
-            
-            # Tabla de Usuarios (SERIAL PRIMARY KEY y TEXT)
-            c.execute("""
-                CREATE TABLE IF NOT EXISTS users (
-                    id SERIAL PRIMARY KEY,
-                    username TEXT UNIQUE NOT NULL,
-                    password_hash TEXT NOT NULL,
-                    full_name TEXT NOT NULL,
-                    role TEXT NOT NULL DEFAULT 'piloto',
-                    is_active INTEGER NOT NULL DEFAULT 1
-                )
-            """)
-            
-            # Tabla de Vehículos
-            c.execute("""
-                CREATE TABLE IF NOT EXISTS vehicles (
-                    plate TEXT PRIMARY KEY NOT NULL,
-                    brand TEXT NOT NULL,
-                    model TEXT NOT NULL,
-                    year INTEGER,
-                    capacity_kg INTEGER,
-                    assigned_pilot_id INTEGER,
-                    FOREIGN KEY (assigned_pilot_id) REFERENCES users(id) ON DELETE SET NULL
-                )
-            """)
-            
-            # Tabla de Reportes (SERIAL, TIMESTAMP y JSONB para rendimiento)
-            c.execute("""
-                CREATE TABLE IF NOT EXISTS reports (
-                    id SERIAL PRIMARY KEY,
-                    driver_id INTEGER NOT NULL,
-                    vehicle_plate TEXT NOT NULL,
-                    report_date TIMESTAMP NOT NULL,
-                    km_actual REAL NOT NULL,
-                    observations TEXT,
-                    header_data JSONB NOT NULL,
-                    checklist_data JSONB NOT NULL,
-                    FOREIGN KEY (driver_id) REFERENCES users(id) ON DELETE CASCADE,
-                    FOREIGN KEY (vehicle_plate) REFERENCES vehicles(plate) ON DELETE CASCADE
-                )
-            """)
-            
-            # Insertar administrador por defecto si no existe (usando %s)
-            admin_username = 'admin'
-            c.execute("SELECT id FROM users WHERE username = %s", (admin_username,))
-            if c.fetchone() is None:
-                admin_password_hash = generate_password_hash("admin123")
-                c.execute("""
-                    INSERT INTO users (username, password_hash, full_name, role) 
-                    VALUES (%s, %s, %s, %s)
-                """, (admin_username, admin_password_hash, 'Administrador Principal', 'admin'))
+    conn = get_db_connection()
+    cur = conn.cursor()
+    
+    # 1. Tabla de Usuarios (Pilotos y Admins) - SINTAXIS POSTGRESQL
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            id SERIAL PRIMARY KEY,
+            username TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL,
+            full_name TEXT NOT NULL,
+            role TEXT NOT NULL DEFAULT 'piloto',
+            is_active INTEGER NOT NULL DEFAULT 1
+        );
+    """)
+    
+    # 2. Tabla de Vehículos - SINTAXIS POSTGRESQL
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS vehicles (
+            plate TEXT PRIMARY KEY NOT NULL,
+            brand TEXT NOT NULL,
+            model TEXT NOT NULL,
+            year INTEGER,
+            capacity_kg INTEGER,
+            assigned_pilot_id INTEGER,
+            FOREIGN KEY (assigned_pilot_id) REFERENCES users(id) ON DELETE SET NULL
+        );
+    """)
+    
+    # 3. Tabla de Reportes - SINTAXIS POSTGRESQL (usa JSONB)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS reports (
+            id SERIAL PRIMARY KEY,
+            driver_id INTEGER NOT NULL,
+            vehicle_plate TEXT NOT NULL,
+            report_date TIMESTAMP NOT NULL,
+            km_actual REAL NOT NULL,
+            observations TEXT,
+            header_data JSONB NOT NULL,
+            checklist_data JSONB NOT NULL,
+            FOREIGN KEY (driver_id) REFERENCES users(id) ON DELETE CASCADE,
+            FOREIGN KEY (vehicle_plate) REFERENCES vehicles(plate) ON DELETE CASCADE
+        );
+    """)
+    
+    # Crear usuario administrador si no existe
+    cur.execute("SELECT id FROM users WHERE username = %s;", ('admin',))
+    admin_exists = cur.fetchone()
+    
+    if not admin_exists:
+        password_hash = generate_password_hash("admin123")
+        cur.execute("""
+            INSERT INTO users (username, password_hash, full_name, role)
+            VALUES (%s, %s, %s, %s)
+            ON CONFLICT (username) DO NOTHING;
+        """, ('admin', password_hash, 'Administrador Principal', 'admin'))
+    
+    conn.commit()
+    conn.close()
 
-        conn.commit()
-    except psycopg2.Error as e:
-        print(f"Error al inicializar la base de datos: {e}")
-    finally:
-        if conn:
-            conn.close()
-
-# --- Funciones de Autenticación y Carga de Datos ---
+# --- Funciones de la Aplicación ---
+# (Las funciones a continuación usan 'RealDictCursor' y %s para los parámetros, típico de psycopg2)
 
 def get_user_by_credentials(username, password):
-    conn = None
-    user = None
-    try:
-        conn = get_db_connection()
-        # Usamos DictCursor para obtener resultados como diccionarios
-        with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as c: 
-            c.execute("SELECT * FROM users WHERE username = %s", (username,))
-            user = c.fetchone()
-            
-            if user and check_password_hash(user['password_hash'], password):
-                # Convertimos el DictRow a un diccionario estándar
-                return dict(user)
-    except psycopg2.Error as e:
-        print(f"Error en get_user_by_credentials: {e}")
-        return None
-    finally:
-        if conn:
-            conn.close()
-
-def get_all_pilots():
-    conn = None
-    users = []
-    try:
-        conn = get_db_connection()
-        with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as c:
-            c.execute("""
-                SELECT 
-                    u.id, 
-                    u.full_name, 
-                    u.username, 
-                    u.role, 
-                    u.is_active, 
-                    v.plate AS assigned_vehicle_plate
-                FROM users u
-                LEFT JOIN vehicles v ON u.id = v.assigned_pilot_id
-                WHERE u.role = 'piloto'
-                ORDER BY u.full_name
-            """)
-            users = [dict(row) for row in c.fetchall()]
-    except psycopg2.Error as e:
-        print(f"Error en get_all_pilots: {e}")
-    finally:
-        if conn:
-            conn.close()
-    return users
-
-def get_all_vehicles():
-    conn = None
-    vehicles = []
-    try:
-        conn = get_db_connection()
-        with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as c:
-            c.execute("""
-                SELECT 
-                    v.plate, 
-                    v.brand, 
-                    v.model, 
-                    v.year, 
-                    v.capacity_kg, 
-                    v.assigned_pilot_id,
-                    u.full_name AS assigned_pilot_name
-                FROM vehicles v
-                LEFT JOIN users u ON v.assigned_pilot_id = u.id
-                ORDER BY v.plate
-            """)
-            vehicles = [dict(row) for row in c.fetchall()]
-    except psycopg2.Error as e:
-        print(f"Error en get_all_vehicles: {e}")
-    finally:
-        if conn:
-            conn.close()
-    return vehicles
-
-def load_pilot_data(pilot_id):
-    conn = None
-    data = None
-    try:
-        conn = get_db_connection()
-        with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as c:
-            c.execute("""
-                SELECT 
-                    u.id, 
-                    u.full_name, 
-                    v.plate, 
-                    v.brand, 
-                    v.model
-                FROM users u
-                LEFT JOIN vehicles v ON u.id = v.assigned_pilot_id
-                WHERE u.id = %s
-            """, (pilot_id,))
-            data = c.fetchone()
-            if data:
-                return dict(data)
-    except psycopg2.Error as e:
-        print(f"Error en load_pilot_data: {e}")
-    finally:
-        if conn:
-            conn.close()
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    
+    cur.execute("SELECT * FROM users WHERE username = %s;", (username,))
+    user = cur.fetchone()
+    conn.close()
+    
+    if user and check_password_hash(user['password_hash'], password):
+        return user
     return None
 
-# --- Funciones de Gestión de Usuarios y Vehículos ---
+def get_all_pilots():
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    
+    cur.execute("""
+        SELECT 
+            u.id, u.username, u.full_name, u.role, u.is_active,
+            v.plate AS assigned_vehicle_plate
+        FROM users u
+        LEFT JOIN vehicles v ON v.assigned_pilot_id = u.id
+        WHERE u.role = 'piloto'
+        ORDER BY u.full_name;
+    """)
+    pilots = cur.fetchall()
+    conn.close()
+    return pilots
 
-def manage_user_web(action, user_id=None, full_name=None, username=None, password=None, status=None):
-    conn = None
+def manage_user_web(action, **kwargs):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    
     try:
-        conn = get_db_connection()
-        c = conn.cursor()
-
         if action == 'add':
-            if not all([full_name, username, password]):
-                raise ValueError("Faltan datos para añadir usuario.")
+            username = kwargs['username']
+            full_name = kwargs['full_name']
+            password = kwargs['password']
+            
+            cur.execute("SELECT id FROM users WHERE username = %s;", (username,))
+            if cur.fetchone():
+                raise ValueError(f"El nombre de usuario '{username}' ya está en uso.")
+                
             password_hash = generate_password_hash(password)
-            try:
-                c.execute("INSERT INTO users (full_name, username, password_hash, role) VALUES (%s, %s, %s, 'piloto')", 
-                          (full_name, username, password_hash))
-            except psycopg2.IntegrityError:
-                raise ValueError(f"El usuario '{username}' ya existe.")
-        
-        elif action == 'toggle_status' and user_id is not None and status is not None:
-            new_status = 1 if status == '0' else 0
-            c.execute("UPDATE users SET is_active = %s WHERE id = %s", (new_status, user_id))
-        
-        elif action == 'delete' and user_id is not None:
-            c.execute("DELETE FROM users WHERE id = %s", (user_id,))
-            # La tabla vehicles tiene ON DELETE SET NULL
+            cur.execute("INSERT INTO users (username, password_hash, full_name) VALUES (%s, %s, %s);", 
+                        (username, password_hash, full_name))
+            
+        elif action == 'delete':
+            user_id = kwargs['user_id']
+            # ON DELETE CASCADE maneja reportes. El FK en vehicles ya tiene ON DELETE SET NULL
+            cur.execute("DELETE FROM users WHERE id = %s AND role = 'piloto';", (user_id,))
+            
+        elif action == 'toggle_status':
+            user_id = kwargs['user_id']
+            status = kwargs['status']
+            new_status = 1 if int(status) == 0 else 0
+            cur.execute("UPDATE users SET is_active = %s WHERE id = %s;", (new_status, user_id))
             
         conn.commit()
-    except psycopg2.Error as e:
+    except psycopg2.IntegrityError as e:
         conn.rollback()
-        raise Exception(f"Error de base de datos al gestionar usuario: {e}")
+        raise ValueError("Error: El nombre de usuario ya existe o error de integridad.")
+    except Exception as e:
+        conn.rollback()
+        raise
     finally:
-        if conn:
-            conn.close()
+        conn.close()
 
-def manage_vehicle(action, plate, brand=None, model=None, year=None, capacity_kg=None, assign_pilot_id=None):
-    conn = None
+def get_all_vehicles():
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    
+    cur.execute("""
+        SELECT v.*, u.full_name AS assigned_pilot_name
+        FROM vehicles v
+        LEFT JOIN users u ON v.assigned_pilot_id = u.id
+        ORDER BY v.plate;
+    """)
+    vehicles = cur.fetchall()
+    conn.close()
+    return vehicles
+
+def manage_vehicle(action, **kwargs):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    plate = kwargs.get('plate')
+    
     try:
-        conn = get_db_connection()
-        c = conn.cursor()
-
         if action == 'add':
-            if not all([plate, brand, model, year, capacity_kg]):
-                raise ValueError("Faltan datos para añadir vehículo.")
-            try:
-                c.execute("INSERT INTO vehicles (plate, brand, model, year, capacity_kg) VALUES (%s, %s, %s, %s, %s)",
-                          (plate.upper(), brand, model, year, capacity_kg))
-            except psycopg2.IntegrityError:
-                raise ValueError(f"La placa '{plate}' ya existe.")
+            # ... (Lógica de inserción similar a la original, adaptada a PostgreSQL) ...
+            plate = kwargs['plate']
+            brand = kwargs['brand']
+            model = kwargs['model']
+            year = int(kwargs['year'])
+            capacity_kg = int(kwargs['capacity_kg'])
+            
+            cur.execute("SELECT plate FROM vehicles WHERE plate = %s;", (plate,))
+            if cur.fetchone():
+                raise ValueError(f"La placa '{plate}' ya está registrada.")
                 
+            cur.execute("""
+                INSERT INTO vehicles (plate, brand, model, year, capacity_kg) 
+                VALUES (%s, %s, %s, %s, %s);
+            """, (plate, brand, model, year, capacity_kg))
+            
+        # ... (Otros bloques 'elif' para update, assign, unassign, delete, adaptados a %s) ...
         elif action == 'update':
-            if not all([plate, brand, model, year, capacity_kg]):
-                raise ValueError("Faltan datos para actualizar vehículo.")
-            c.execute("UPDATE vehicles SET brand=%s, model=%s, year=%s, capacity_kg=%s WHERE plate=%s",
-                      (brand, model, year, capacity_kg, plate.upper()))
+            brand = kwargs['brand']
+            model = kwargs['model']
+            year = int(kwargs['year'])
+            capacity_kg = int(kwargs['capacity_kg'])
+            
+            cur.execute("""
+                UPDATE vehicles 
+                SET brand = %s, model = %s, year = %s, capacity_kg = %s 
+                WHERE plate = %s;
+            """, (brand, model, year, capacity_kg, plate))
             
         elif action == 'assign':
-            if assign_pilot_id and assign_pilot_id != 'None':
-                # Primero desasigna el piloto de cualquier otro vehículo
-                c.execute("UPDATE vehicles SET assigned_pilot_id = NULL WHERE assigned_pilot_id = %s", (assign_pilot_id,))
-                # Luego asigna al nuevo vehículo
-                c.execute("UPDATE vehicles SET assigned_pilot_id = %s WHERE plate = %s", (assign_pilot_id, plate.upper()))
-            else:
-                c.execute("UPDATE vehicles SET assigned_pilot_id = NULL WHERE plate = %s", (plate.upper(),))
-        
+            pilot_id = kwargs['assign_pilot_id']
+            cur.execute("UPDATE vehicles SET assigned_pilot_id = NULL WHERE assigned_pilot_id = %s;", (pilot_id,))
+            cur.execute("UPDATE vehicles SET assigned_pilot_id = %s WHERE plate = %s;", (pilot_id, plate))
+            
         elif action == 'unassign':
-            c.execute("UPDATE vehicles SET assigned_pilot_id = NULL WHERE plate = %s", (plate.upper(),))
-        
+            cur.execute("UPDATE vehicles SET assigned_pilot_id = NULL WHERE plate = %s;", (plate,))
+            
         elif action == 'delete':
-            # La tabla reports tiene ON DELETE CASCADE, pero es más seguro eliminar explícitamente si no se confía 100% en la FK
-            c.execute("DELETE FROM reports WHERE vehicle_plate = %s", (plate.upper(),)) 
-            c.execute("DELETE FROM vehicles WHERE plate = %s", (plate.upper(),))
+            cur.execute("DELETE FROM vehicles WHERE plate = %s;", (plate,))
             
         conn.commit()
-    except psycopg2.Error as e:
+    except Exception as e:
         conn.rollback()
-        raise Exception(f"Error de base de datos al gestionar vehículo: {e}")
+        raise
     finally:
-        if conn:
-            conn.close()
+        conn.close()
 
-# --- Función de Guardar Reporte ---
+def load_pilot_data(driver_id):
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    
+    cur.execute("""
+        SELECT 
+            u.id, u.full_name, v.plate, v.brand, v.model 
+        FROM users u
+        LEFT JOIN vehicles v ON u.id = v.assigned_pilot_id
+        WHERE u.id = %s;
+    """, (driver_id,))
+    
+    data = cur.fetchone()
+    conn.close()
+    return data
 
-def save_report_web(driver_id, report_data, checklist_results, observations, signature_confirmation):
-    conn = None
+def save_report_web(driver_id, header_data, checklist_results, observations, signature_confirmation):
+    if signature_confirmation != 'confirmado':
+        raise ValueError("Debe confirmar la inspección.")
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    header_json = json.dumps(header_data)
+    checklist_json = json.dumps(checklist_results)
+    
+    vehicle_plate = header_data.get('plate')
+    km_actual = header_data.get('km_actual')
+
+    if not vehicle_plate or km_actual is None:
+        raise ValueError("Faltan datos críticos del vehículo o kilometraje.")
+        
     try:
-        conn = get_db_connection()
-        c = conn.cursor()
-        
-        plate = report_data['plate']
-        km_actual = report_data['km_actual']
-        
-        header_data_json = json.dumps({
-            'brand': report_data['brand'],
-            'model': report_data['model'],
-            'signature_confirmation': signature_confirmation
-        })
-        
-        checklist_json = json.dumps(checklist_results)
-        # Usamos TIMESTAMP de PostgreSQL.
-        report_date = datetime.datetime.now()
-
-        # Usamos JSONB para guardar los datos JSON
-        c.execute("""
-            INSERT INTO reports (driver_id, vehicle_plate, report_date, km_actual, observations, header_data, checklist_data)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
-        """, (driver_id, plate, report_date, km_actual, observations, header_data_json, checklist_json))
+        # NOW() es la función de fecha/hora de PostgreSQL
+        cur.execute("""
+            INSERT INTO reports (
+                driver_id, vehicle_plate, report_date, km_actual, observations, header_data, checklist_data
+            ) VALUES (%s, %s, NOW(), %s, %s, %s, %s);
+        """, (
+            driver_id,
+            vehicle_plate,
+            km_actual,
+            observations,
+            header_json,
+            checklist_json
+        ))
         
         conn.commit()
-    except psycopg2.Error as e:
+    except Exception as e:
         conn.rollback()
-        raise Exception(f"Error de base de datos al guardar reporte: {e}")
+        raise Exception(f"Error al guardar el reporte: {e}")
     finally:
-        if conn:
-            conn.close()
-
-def delete_report(report_id):
-    conn = None
-    try:
-        conn = get_db_connection()
-        c = conn.cursor()
-        c.execute("DELETE FROM reports WHERE id = %s", (report_id,))
-        conn.commit()
-    except psycopg2.Error as e:
-        conn.rollback()
-        raise Exception(f"Error de base de datos al eliminar reporte: {e}")
-    finally:
-        if conn:
-            conn.close()
-        
-# --- Función de Reportes Filtrados (CRÍTICA) ---
+        conn.close()
 
 def get_filtered_reports(start_date=None, end_date=None, pilot_id=None, plate=None):
-    """
-    Obtiene reportes aplicando filtros, usando pandas con conexión PostgreSQL.
-    """
-    conn = None
+    # Usamos pandas.read_sql_query con la conexión a PostgreSQL (psycopg2)
+    conn = get_db_connection()
+    
     query = """
     SELECT
-        r.id,
-        r.report_date,
-        u.full_name AS pilot_name, 
-        r.driver_id,
-        r.vehicle_plate,
-        r.km_actual,
-        r.observations,
-        r.header_data,  
-        r.checklist_data 
-    FROM 
-        reports r
-    JOIN 
-        users u ON r.driver_id = u.id
+        r.id, r.report_date, u.full_name AS pilot_name, r.driver_id, r.vehicle_plate,
+        r.km_actual, r.observations, r.header_data, r.checklist_data 
+    FROM reports r
+    JOIN users u ON r.driver_id = u.id
     WHERE 1=1
     """
-    params = []
+    params = {}
     
     if start_date:
-        query += " AND r.report_date >= %s"
-        params.append(start_date)
+        query += " AND r.report_date >= %(start_date)s"
+        params['start_date'] = start_date
     
     if end_date:
-        query += " AND r.report_date <= %s"
-        # Incluye hasta el final del día
-        params.append(end_date + " 23:59:59") 
+        query += " AND r.report_date <= %(end_date)s"
+        params['end_date'] = end_date + " 23:59:59"
         
     if pilot_id:
-        query += " AND r.driver_id = %s"
-        params.append(pilot_id)
+        query += " AND r.driver_id = %(pilot_id)s"
+        params['pilot_id'] = pilot_id
         
     if plate:
-        query += " AND r.vehicle_plate = %s"
-        params.append(plate)
+        query += " AND r.vehicle_plate = %(plate)s"
+        params['plate'] = plate
 
     query += " ORDER BY r.report_date DESC"
     
     try:
-        conn = get_db_connection()
-        # pandas.read_sql_query es compatible con la conexión de psycopg2 y maneja los parámetros %s
         df = pd.read_sql_query(query, conn, params=params)
         
-        # Deserialización JSON: Convierte las strings JSON a objetos/diccionarios de Python
-        # JSONB en PostgreSQL ya es casi un objeto de Python, pero pandas lo lee como string,
-        # así que la deserialización sigue siendo necesaria para asegurar el tipo de dato.
-        df['header_data'] = df['header_data'].apply(lambda x: json.loads(x) if x and isinstance(x, str) else x)
-        df['checklist_data'] = df['checklist_data'].apply(lambda x: json.loads(x) if x and isinstance(x, str) else x)
+        # Deserialización JSONB: Asegurar que los datos JSON se conviertan a diccionarios
+        df['header_data'] = df['header_data'].apply(lambda x: json.loads(x) if isinstance(x, str) else x)
+        df['checklist_data'] = df['checklist_data'].apply(lambda x: json.loads(x) if isinstance(x, str) else x)
         
-        return df.to_dict('records')
+        reports_list = df.to_dict('records')
+        return reports_list
+        
     except Exception as e:
-        print(f"Error en get_filtered_reports: {e}")
-        return []
+        raise Exception(f"Error al ejecutar consulta filtrada con pandas/psycopg2: {e}")
     finally:
-        if conn:
-            conn.close()
+        conn.close()
+
+
+def delete_report(report_id):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("DELETE FROM reports WHERE id = %s;", (report_id,))
+        if cur.rowcount == 0:
+            raise ValueError(f"No se encontró el reporte con ID {report_id} para eliminar.")
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        raise Exception(f"Error al eliminar el reporte: {e}")
+    finally:
+        conn.close()
