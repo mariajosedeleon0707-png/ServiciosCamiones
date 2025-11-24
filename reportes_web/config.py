@@ -1,5 +1,5 @@
 
-SECRET_KEY = 'tu_clave_secreta_aleatoria'
+SECRET_KEY = '73851046920158372940651382749501'
 
 # 📋 ITEMS DEL CHECKLIST (Definición de los ítems del formato PEM 360)
 CHECKLIST_ITEMS = [
