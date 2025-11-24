@@ -1,13 +1,11 @@
-{
-  "functions": {
+"functions": {
     "main.py": {
       "runtime": "python3.9"
     }
   },
-  "routes": [
+"routes": [
     {
       "src": "/(.*)",
       "dest": "main.py"
     }
   ]
-}
