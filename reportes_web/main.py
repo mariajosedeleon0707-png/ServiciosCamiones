@@ -7,8 +7,9 @@ from config import SECRET_KEY, CHECKLIST_ITEMS
 import db_manager 
 
 # --- Inicialización de la Aplicación ---
-app = Flask(__name__)
-app.secret_key = SECRET_KEY 
+# Se inicializa con 'main'
+main = Flask(__name__)
+main.secret_key = SECRET_KEY 
 
 # 🛠️ --- FILTROS PERSONALIZADOS DE JINJA ---
 def format_thousand_separator(value):
@@ -23,7 +24,8 @@ def format_thousand_separator(value):
     except (ValueError, TypeError):
         return str(value) 
 
-app.jinja_env.filters['separator'] = format_thousand_separator
+# Se cambia 'app.jinja_env.filters' a 'main.jinja_env.filters'
+main.jinja_env.filters['separator'] = format_thousand_separator
 # 🛠️ --- FIN FILTROS PERSONALIZADOS DE JINJA ---
 
 # --- Decoradores ---
@@ -50,7 +52,8 @@ def login_required(f):
 
 # --- Rutas de Autenticación y Home ---
 
-@app.route('/')
+# Se cambia '@app.route' a '@main.route' en todas las rutas
+@main.route('/')
 def home():
     if 'user_id' in session:
         if session.get('role') == 'admin':
@@ -59,7 +62,7 @@ def home():
             return redirect(url_for('pilot_form'))
     return redirect(url_for('login'))
 
-@app.route('/login', methods=['GET', 'POST'])
+@main.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
         username = request.form['username']
@@ -77,10 +80,10 @@ def login():
             flash("Su cuenta ha sido deshabilitada. Contacte al administrador.", 'danger')
         else:
             flash('Usuario o contraseña incorrectos.', 'danger')
-        
+            
     return render_template('login.html')
 
-@app.route('/logout')
+@main.route('/logout')
 def logout():
     session.clear()
     flash('Sesión cerrada correctamente.', 'info')
@@ -88,7 +91,7 @@ def logout():
 
 # --- Rutas de Piloto ---
 
-@app.route('/pilot/form', methods=['GET', 'POST'])
+@main.route('/pilot/form', methods=['GET', 'POST'])
 @login_required
 def pilot_form():
     if session.get('role') != 'piloto':
@@ -167,7 +170,7 @@ def pilot_form():
 
 # --- Rutas de Administración (Usuarios y Vehículos) ---
 
-@app.route('/admin/pilots', methods=['GET', 'POST'])
+@main.route('/admin/pilots', methods=['GET', 'POST'])
 @admin_required
 def manage_pilots_web():
     if request.method == 'POST':
@@ -197,7 +200,7 @@ def manage_pilots_web():
     return render_template('admin_pilots.html', users=users)
 
 
-@app.route('/admin/vehicles', methods=['GET', 'POST'])
+@main.route('/admin/vehicles', methods=['GET', 'POST'])
 @admin_required
 def manage_vehicles_web():
     if request.method == 'POST':
@@ -251,7 +254,7 @@ def manage_vehicles_web():
 
 # --- Rutas de Reportes ---
 
-@app.route('/admin/reports', methods=['GET'])
+@main.route('/admin/reports', methods=['GET'])
 @admin_required
 def review_reports_web():
     """Muestra la interfaz de revisión de reportes con filtros y paginación."""
@@ -294,7 +297,7 @@ def review_reports_web():
                             reports_json=reports_json)
 
 
-@app.route('/admin/reports/delete/<int:report_id>', methods=['POST'])
+@main.route('/admin/reports/delete/<int:report_id>', methods=['POST'])
 @admin_required
 def delete_report_web(report_id):
     """
@@ -309,7 +312,7 @@ def delete_report_web(report_id):
     return redirect(url_for('review_reports_web'))
 
 
-@app.route('/admin/reports/export', methods=['GET'])
+@main.route('/admin/reports/export', methods=['GET'])
 @admin_required
 def export_reports():
     """Exporta los reportes filtrados a un archivo CSV."""
@@ -372,5 +375,6 @@ except ConnectionError as e:
     # Nota: El error HTTP 500 será generado si la conexión falla aquí.
     pass
 
-# El objeto 'app' ya está disponible globalmente y Vercel lo detectará.
-# El bloque 'if __name__ == "__main__":' ha sido eliminado para la compatibilidad con Vercel.
+# El objeto 'main' ya está disponible globalmente y Vercel lo detectará si está configurado en vercel.json.
+# Si el archivo principal se llama 'app.py' y quieres que Vercel lo ejecute, 
+# asegúrate de que 'app.py' tenga el contenido de este código.
