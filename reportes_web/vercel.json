@@ -6,14 +6,16 @@
       "src": "app.py",
       "use": "@vercel/python",
       "config": {
-        "maxLambdaSize": "15mb",
-        "runtime": "python3.9"
+        "runtime": "python3.9" 
+        /* Si tu app es simple, puedes omitir "maxLambdaSize" */
       }
     }
   ],
   "routes": [
     {
+      /* Dirige todas las solicitudes entrantes (cualquier URL) */
       "src": "/(.*)",
+      /* A tu archivo app.py, que contiene la instancia de Flask 'app' */
       "dest": "app.py"
     }
   ]
