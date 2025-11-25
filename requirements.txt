@@ -1,4 +1,12 @@
+# 1. Servidor Web
+Flask
+# Si usas CORS para peticiones front-end
+flask-cors 
+
+# 2. Base de Datos
 psycopg2-binary
+
+# 3. Utilidades y Seguridad
 Werkzeug
 pandas
 python-dotenv
