@@ -1,0 +1,199 @@
+{% extends "base.html" %}
+{% block title %}Revisión de Reportes{% endblock %}
+
+{% block content %}
+<h2>Revisión y Exportación de Reportes</h2>
+<p class="lead">Filtre los reportes por rango de fechas, piloto o vehículo, y expórtelos a un archivo CSV.</p>
+
+<div class="card shadow-sm mb-4">
+    <div class="card-header bg-light">
+        Filtros de Búsqueda
+    </div>
+    <div class="card-body">
+        <form method="GET" action="{{ url_for('review_reports_web') }}">
+            <div class="row g-3 align-items-end">
+                <div class="col-md-3">
+                    <label for="start_date" class="form-label">Desde</label>
+                    <input type="date" class="form-control" id="start_date" name="start_date" value="{{ filters.start_date }}">
+                </div>
+                <div class="col-md-3">
+                    <label for="end_date" class="form-label">Hasta</label>
+                    <input type="date" class="form-control" id="end_date" name="end_date" value="{{ filters.end_date }}">
+                </div>
+                <div class="col-md-3">
+                    <label for="pilot_id" class="form-label">Piloto</label>
+                    <select class="form-select" id="pilot_id" name="pilot_id">
+                        <option value="">Todos los Pilotos</option>
+                        {% for pilot in pilots %}
+                        <option value="{{ pilot.id }}" {% if filters.pilot_id|string == pilot.id|string %}selected{% endif %}>
+                            {{ pilot.full_name }}
+                        </option>
+                        {% endfor %}
+                    </select>
+                </div>
+                 <div class="col-md-2">
+                    <label for="vehicle_plate" class="form-label">Matrícula</label>
+                    <input type="text" class="form-control" id="vehicle_plate" name="vehicle_plate" value="{{ filters.vehicle_plate }}" placeholder="Ej: C123456">
+                </div>
+                <div class="col-md-1 d-grid">
+                    <button type="submit" class="btn btn-primary">Buscar</button>
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h3>Resultados ({{ reports | length }} reportes encontrados)</h3>
+    <a href="{{ url_for('export_reports') }}?{{ request.query_string.decode() }}" class="btn btn-success">
+        💾 Exportar a CSV
+    </a>
+</div>
+
+{% if reports %}
+<div class="table-responsive">
+    <table class="table table-striped table-hover align-middle">
+        <thead class="table-dark">
+            <tr>
+                <th>ID</th>
+                <th>Fecha/Hora</th>
+                <th>Piloto</th>
+                <th>Matrícula</th>
+                <th>KM</th>
+                <th>Obs.</th>
+                <th>Acciones</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for report in reports %}
+            <tr>
+                <td>{{ report.id }}</td>
+                <td>{{ report.report_date.split(' ')[0] }}<br><small class="text-muted">{{ report.report_date.split(' ')[1] }}</small></td>
+                <td>{{ report.pilot_name }}</td>
+                <td>{{ report.vehicle_plate }}</td>
+                <td>{{ report.km_actual | int | separator }}</td> 
+                <td> 
+                    {% if report.observations %}
+                        <span class="badge bg-warning text-dark">SÍ</span>
+                    {% else %}
+                        <span class="badge bg-secondary">NO</span>
+                    {% endif %}
+                </td>
+                <td>
+                    <button class="btn btn-sm btn-info" onclick='showReportDetail({{ report | tojson | safe }})'>Detalle</button>
+                    
+                    <form method="POST" style="display:inline;" action="{{ url_for('delete_report_web', report_id=report.id) }}" onsubmit="return confirm('¿Está seguro de que desea eliminar este reporte?')">
+                        <button type="submit" class="btn btn-sm btn-danger">Eliminar</button>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<div class="alert alert-info" role="alert">
+    No se encontraron reportes con los filtros aplicados.
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<div class="modal fade" id="detailModal" tabindex="-1" aria-labelledby="detailModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header bg-primary text-white">
+                <h5 class="modal-title" id="detailModalLabel">Detalle del Reporte #...</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body" id="detail-body">
+                </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cerrar</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    function showReportDetail(report) {
+        if (!report || !report.header_data || !report.checklist_data) {
+            console.error("Reporte no válido o datos incompletos.");
+            document.getElementById('detail-body').innerHTML = '<div class="alert alert-danger">Error: Datos de reporte no encontrados o inválidos.</div>';
+            return;
+        }
+
+        const header_data = report.header_data;
+        const checklist = report.checklist_data;
+        
+        let html = `
+            <h6>Datos del Reporte</h6>
+            <table class="table table-sm table-borderless">
+                <tr><th>Reporte ID:</th><td>${report.id}</td></tr>
+                <tr><th>Fecha:</th><td>${report.report_date}</td></tr>
+                <tr><th>Piloto:</th><td>${report.pilot_name}</td></tr>
+                <tr><th>Vehículo:</th><td>${report.vehicle_plate} (${header_data.brand || 'N/A'} ${header_data.model || 'N/A'})</td></tr>
+                <tr><th>Kilometraje Actual:</th><td>${report.km_actual} KM</td></tr>
+                <tr><th>Observaciones:</th><td>${report.observations || 'N/A'}</td></tr>
+                <tr><th>Confirmación de Piloto:</th><td>${header_data.signature_confirmation || 'PENDIENTE'}</td></tr>
+            </table>
+            
+            <hr>
+            <h6>Datos de Logística y Servicio</h6>
+            <table class="table table-sm table-borderless">
+                <tr><th>Marca a Promocionar:</th><td>${header_data.promo_marca || 'N/A'}</td></tr>
+                <tr><th>Fecha Inicio Campaña:</th><td>${header_data.fecha_inicio || 'N/A'}</td></tr>
+                <tr><th>Fecha Finalización Campaña:</th><td>${header_data.fecha_finalizacion || 'N/A'}</td></tr>
+                <tr><th>Tipo de Licencia:</th><td>${header_data.tipo_licencia || 'N/A'}</td></tr>
+                <tr><th>Vencimiento Licencia:</th><td>${header_data.vencimiento_licencia || 'N/A'}</td></tr>
+                <tr><th>Tarjeta Seguro:</th><td>${header_data.tarjeta_seguro || 'N/A'}</td></tr>
+                <tr><th>KM Próximo Servicio:</th><td>${header_data.km_proximo_servicio || 'N/A'}</td></tr>
+                <tr><th>Fecha Servicio Anterior:</th><td>${header_data.fecha_servicio_anterior || 'N/A'}</td></tr>
+            </table>
+            
+            <hr>
+            <h6>Resultados del Checklist</h6>
+            <table class="table table-bordered table-sm">
+                <thead>
+                    <tr>
+                        <th style="width: 70%;">Ítem</th>
+                        <th>Resultado</th>
+                    </tr>
+                </thead>
+                <tbody>
+        `;
+        
+        // Generar filas para el checklist
+        for (const [item, status] of Object.entries(checklist)) {
+            let badge = '';
+            // Verificamos 'OK', 'Falla', 'N/A' que son los valores que se guardan.
+            if (status === 'OK') { 
+                badge = '<span class="badge bg-success">OK</span>';
+            } else if (status === 'Falla') { 
+                badge = '<span class="badge bg-danger">FALLA</span>';
+            } else { 
+                badge = '<span class="badge bg-secondary">N/A</span>';
+            }
+            html += `
+                <tr>
+                    <td>${item}</td>
+                    <td>${badge}</td>
+                </tr>
+            `;
+        }
+        
+        html += `
+                </tbody>
+            </table>
+        `;
+        
+        // Actualizar el título y cuerpo del modal
+        document.getElementById('detailModalLabel').innerText = `Detalle de Reporte #${report.id}`;
+        document.getElementById('detail-body').innerHTML = html;
+
+        // Mostrar el modal
+        var detailModal = new bootstrap.Modal(document.getElementById('detailModal'));
+        detailModal.show();
+    }
+</script>
+{% endblock %}
