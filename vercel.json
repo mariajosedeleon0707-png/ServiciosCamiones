@@ -1,14 +1,15 @@
 {
+  "version": 2,
   "builds": [
     {
-      "src": "main.py", // Vercel sabe que debe buscar aquí
+      "src": "main.py",
       "use": "@vercel/python"
-    }
+    } 
   ],
-  "routes": [
+  "routes": [ 
     {
       "src": "/(.*)",
-      "dest": "main.py" // Todas las peticiones van a este archivo
+      "dest": "main.py"
     }
-  ]
+  ] 
 }
