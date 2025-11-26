@@ -15,7 +15,7 @@ except ImportError:
     print("Advertencia: psycopg2 no está instalado. No se puede conectar a PostgreSQL.")
     POSTGRES_ACTIVE = False
 
-# Librería para la función de reportes filtrados (mantener si se usa en get_filtered_reports)
+# Librería para la función de reportes filtrados
 try:
     import pandas as pd
 except ImportError:
@@ -59,7 +59,11 @@ def get_db_connection():
             database=DB_NAME,
             user=DB_USER,
             password=DB_PASSWORD,
-            port=DB_PORT
+            port=DB_PORT,
+            # === ARREGLO CLAVE PARA VERCELL/SUPABASE ===
+            # Fuerza la conexión a usar IPv4 para evitar el error 'Cannot assign requested address'
+            fallback_application_name='Vercel_App_IPv4_Fix'
+            # ==========================================
         )
         return conn
     except psycopg2.OperationalError as e:
@@ -129,7 +133,6 @@ def inicializar_db():
     conn.close()
 
 # --- Funciones de la Aplicación ---
-# (Las funciones a continuación usan 'RealDictCursor' y %s para los parámetros, típico de psycopg2)
 
 def get_user_by_credentials(username, password):
     conn = get_db_connection()
@@ -220,7 +223,6 @@ def manage_vehicle(action, **kwargs):
     
     try:
         if action == 'add':
-            # ... (Lógica de inserción similar a la original, adaptada a PostgreSQL) ...
             plate = kwargs['plate']
             brand = kwargs['brand']
             model = kwargs['model']
@@ -236,7 +238,6 @@ def manage_vehicle(action, **kwargs):
                 VALUES (%s, %s, %s, %s, %s);
             """, (plate, brand, model, year, capacity_kg))
             
-        # ... (Otros bloques 'elif' para update, assign, unassign, delete, adaptados a %s) ...
         elif action == 'update':
             brand = kwargs['brand']
             model = kwargs['model']
@@ -251,7 +252,9 @@ def manage_vehicle(action, **kwargs):
             
         elif action == 'assign':
             pilot_id = kwargs['assign_pilot_id']
+            # Desasigna la placa de cualquier otro piloto
             cur.execute("UPDATE vehicles SET assigned_pilot_id = NULL WHERE assigned_pilot_id = %s;", (pilot_id,))
+            # Asigna la placa al piloto actual
             cur.execute("UPDATE vehicles SET assigned_pilot_id = %s WHERE plate = %s;", (pilot_id, plate))
             
         elif action == 'unassign':
@@ -323,6 +326,11 @@ def save_report_web(driver_id, header_data, checklist_results, observations, sig
 
 def get_filtered_reports(start_date=None, end_date=None, pilot_id=None, plate=None):
     # Usamos pandas.read_sql_query con la conexión a PostgreSQL (psycopg2)
+    
+    # Importante: pandas debe estar instalado para que esta función trabaje
+    if 'pd' not in globals():
+         raise ImportError("La librería pandas no está instalada, no se pueden usar reportes filtrados.")
+         
     conn = get_db_connection()
     
     query = """
@@ -354,12 +362,14 @@ def get_filtered_reports(start_date=None, end_date=None, pilot_id=None, plate=No
     query += " ORDER BY r.report_date DESC"
     
     try:
-        # Asegúrate de que pandas esté importado correctamente para usar read_sql_query
         df = pd.read_sql_query(query, conn, params=params)
         
         # Deserialización JSONB: Asegurar que los datos JSON se conviertan a diccionarios
-        df['header_data'] = df['header_data'].apply(lambda x: json.loads(x) if isinstance(x, str) else x)
-        df['checklist_data'] = df['checklist_data'].apply(lambda x: json.loads(x) if isinstance(x, str) else x)
+        # (Esto puede ser necesario si la columna es leída como string por pandas/psycopg2)
+        if 'header_data' in df.columns:
+            df['header_data'] = df['header_data'].apply(lambda x: json.loads(x) if isinstance(x, str) else x)
+        if 'checklist_data' in df.columns:
+            df['checklist_data'] = df['checklist_data'].apply(lambda x: json.loads(x) if isinstance(x, str) else x)
         
         reports_list = df.to_dict('records')
         return reports_list
