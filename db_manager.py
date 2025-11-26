@@ -60,10 +60,11 @@ def get_db_connection():
             user=DB_USER,
             password=DB_PASSWORD,
             port=DB_PORT,
-            # === ARREGLO CLAVE PARA VERCELL/SUPABASE ===
-            # Fuerza la conexión a usar IPv4 para evitar el error 'Cannot assign requested address'
-            fallback_application_name='Vercel_App_IPv4_Fix'
-            # ==========================================
+            # === ARREGLO 1: FUERZA IPv4 para evitar el error 'Cannot assign requested address' ===
+            fallback_application_name='Vercel_App_IPv4_Fix',
+            # === ARREGLO 2: FUERZA SSL/TLS, requerido por Supabase ===
+            sslmode='require' 
+            # ===================================================================================
         )
         return conn
     except psycopg2.OperationalError as e:
@@ -393,3 +394,4 @@ def delete_report(report_id):
         raise Exception(f"Error al eliminar el reporte: {e}")
     finally:
         conn.close()
+
