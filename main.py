@@ -4,7 +4,7 @@ import io
 import csv
 from flask import Flask, render_template, request, redirect, url_for, session, flash, make_response
 from config import SECRET_KEY, CHECKLIST_ITEMS 
-# Asegúrate de que db_manager maneja la conexión y las operaciones
+# es para que funcione
 import db_manager 
 
 # --- Inicialización de la Aplicación ---
