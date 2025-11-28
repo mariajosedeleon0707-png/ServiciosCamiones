@@ -35,34 +35,22 @@ except ImportError:
 
 DATABASE_URL = os.environ.get('DATABASE_URL')
 # --- Funciones de Conexión ---
-
 def get_db_connection():
     if not POSTGRES_ACTIVE:
         raise Exception("El módulo psycopg2 no está disponible o la importación falló.")
     
-    # **VALIDACIÓN CRÍTICA**
-    if not all([DB_HOST, DB_NAME, DB_USER, DB_PASSWORD]):
-        raise ConnectionError("Faltan variables de entorno esenciales (DB_HOST, DB_USER, DB_PASSWORD, etc.). Revise su archivo .env o la configuración de Vercel.")
+    # 🌟 CORRECCIÓN 1: Nueva validación
+    if not DATABASE_URL: 
+        raise ConnectionError("Falta la variable de entorno esencial DATABASE_URL. Revise su configuración de Vercel/Supabase.")
 
     try:
-        conn = psycopg2.connect(
-            host=DB_HOST,
-            database=DB_NAME,
-            user=DB_USER,
-            password=DB_PASSWORD,
-            port=DB_PORT,
-            # === ARREGLO 1: FUERZA IPv4 para evitar el error 'Cannot assign requested address' ===
-            fallback_application_name='Vercel_App_IPv4_Fix',
-            # === ARREGLO 2: FUERZA SSL/TLS, requerido por Supabase ===
-            sslmode='require' 
-            # ===================================================================================
-        )
+        # 🌟 CORRECCIÓN 2: Usar la URI para conectar
+        conn = psycopg2.connect(DATABASE_URL) 
         return conn
     except psycopg2.OperationalError as e:
-        # Mensaje de error útil si fallan las variables de Vercel
-        print(f"Error de conexión a PostgreSQL. Revise las Variables de Entorno de Vercel/Supabase: {e}")
+        # Mensaje de error útil si falla la conexión
+        print(f"Error de conexión a PostgreSQL. Revise la variable DATABASE_URL: {e}")
         raise ConnectionError(f"No se pudo conectar a la base de datos: {e}")
-
 
 def inicializar_db():
     conn = get_db_connection()
