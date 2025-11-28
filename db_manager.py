@@ -1,5 +1,3 @@
-# db_manager.py (Versión PostgreSQL / Supabase)
-
 import os
 import datetime
 import json
