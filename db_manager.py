@@ -33,16 +33,7 @@ except ImportError:
     pass
 # -----------------------------------------------------------
 
-
-# --- CONFIGURACIÓN PARA POSTGRESQL (SUPABASE) ---
-# Ahora estas líneas leerán primero del .env si existe, o de Vercel si estás desplegado
-DB_HOST = os.environ.get('DB_HOST')
-DB_NAME = os.environ.get('DB_NAME')
-DB_USER = os.environ.get('DB_USER')
-DB_PASSWORD = os.environ.get('DB_PASSWORD')
-DB_PORT = os.environ.get('DB_PORT', '5432')
-
-
+DATABASE_URL = os.environ.get('DATABASE_URL')
 # --- Funciones de Conexión ---
 
 def get_db_connection():
