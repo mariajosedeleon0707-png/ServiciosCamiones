@@ -98,14 +98,6 @@
                         <label for="model" class="form-label">Modelo</label>
                         <input type="text" class="form-control" id="model" name="model" required>
                     </div>
-                    <div class="mb-3">
-                        <label for="year" class="form-label">Año</label>
-                        <input type="number" class="form-control" id="year" name="year" required min="1900">
-                    </div>
-                    <div class="mb-3">
-                        <label for="capacity_kg" class="form-label">Capacidad (kg)</label>
-                        <input type="number" class="form-control" id="capacity_kg" name="capacity_kg" required min="1">
-                    </div>
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cerrar</button>
@@ -130,15 +122,13 @@
         document.getElementById('plate').readOnly = false;
     };
 
-    function editVehicle(plate, brand, model, year, capacity) {
+    function editVehicle(plate, brand, model) {
         document.getElementById('modalLabel').innerText = 'Editar Vehículo ' + plate;
         document.getElementById('vehicleAction').value = 'update';
         document.getElementById('plate').value = plate;
         document.getElementById('plate').readOnly = true; 
         document.getElementById('brand').value = brand;
         document.getElementById('model').value = model;
-        document.getElementById('year').value = year;
-        document.getElementById('capacity_kg').value = capacity;
         addVehicleModal.show();
     }
     
