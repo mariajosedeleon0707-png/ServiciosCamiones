@@ -14,9 +14,6 @@
         <tr>
             <th>Matrícula</th>
             <th>Marca</th>
-            <th>Modelo</th>
-            <th>Año</th>
-            <th>Capacidad (kg)</th>
             <th>Piloto Asignado</th>
             <th>Acciones</th>
         </tr>
@@ -27,11 +24,9 @@
             <td>{{ vehicle.plate }}</td>
             <td>{{ vehicle.brand }}</td>
             <td>{{ vehicle.model }}</td>
-            <td>{{ vehicle.year }}</td>
-            <td>{{ vehicle.capacity_kg }}</td>
             <td>{{ vehicle.assigned_pilot_name | default('Ninguno') }}</td>
             <td>
-                <button class="btn btn-sm btn-warning" onclick="editVehicle('{{ vehicle.plate }}', '{{ vehicle.brand }}', '{{ vehicle.model }}', '{{ vehicle.year }}', '{{ vehicle.capacity_kg }}')">Editar</button>
+                <button class="btn btn-sm btn-warning" onclick="editVehicle('{{ vehicle.plate }}', '{{ vehicle.brand }}', '{{ vehicle.model }}')>Editar</button>
                 
                 <button class="btn btn-sm btn-info" onclick="openAssignmentModal('{{ vehicle.plate }}', '{{ vehicle.assigned_pilot_name }}')">Asignar Piloto</button>
 
