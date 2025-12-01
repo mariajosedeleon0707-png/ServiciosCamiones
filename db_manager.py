@@ -120,7 +120,7 @@ def get_user_by_credentials(username, password):
     user = cur.fetchone()
     conn.close()
     
-    if user and check_password_hash(user['password_hash'], password):
+    if user and check_password_hash(user['32768:8:1$ZdbQUffPD4m5Q2k1$6b50a9ddd43978534d8a6324bdd13c3f188f8bed29c8c712183aa89d6321fef57bb54e43ca160ace9864e7661962747d5baea8a3e2479925e1a1f3d972bc38c6'], password):
         return user
     return None
 
