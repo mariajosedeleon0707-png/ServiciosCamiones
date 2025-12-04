@@ -1,380 +1,230 @@
-import json
-import functools
-import io
-import csv
-from flask import Flask, render_template, request, redirect, url_for, session, flash, make_response
-from config import SECRET_KEY, CHECKLIST_ITEMS 
-# es para que funcione
-import db_manager 
+{% extends "base.html" %}
+{% block title %}Revisión de Reportes{% endblock %}
 
-# --- Inicialización de la Aplicación ---
-# ¡CORRECCIÓN CLAVE para Vercel! Se usa 'app' en lugar de 'main'
-app = Flask(__name__)
-app.secret_key = SECRET_KEY 
+{% block content %}
+<h2>Revisión y Exportación de Reportes</h2>
+<p class="lead">Filtre los reportes por rango de fechas, piloto o vehículo, y expórtelos a un archivo CSV.</p>
 
-# 🛠️ --- FILTROS PERSONALIZADOS DE JINJA ---
-def format_thousand_separator(value):
-    """
-    Filtro para añadir separador de miles (punto) en Jinja.
-    """
-    try:
-        # Convertir a entero y formatear con coma (separador por defecto en Python/US)
-        formatted = f"{int(value):,}"
-        # Reemplazar la coma por un punto para el formato español/Latinoamericano
-        return formatted.replace(',', '.')
-    except (ValueError, TypeError):
-        return str(value) 
+<div class="card shadow-sm mb-4">
+    <div class="card-header bg-light">
+        Filtros de Búsqueda
+    </div>
+    <div class="card-body">
+        <form method="GET" action="{{ url_for('admin_reports') }}"> {# Endpoint correcto #}
+            <div class="row g-3 align-items-end">
+                <div class="col-md-3">
+                    <label for="start_date" class="form-label">Desde</label>
+                    <input type="date" class="form-control" id="start_date" name="start_date" value="{{ filters.start_date }}">
+                </div>
+                <div class="col-md-3">
+                    <label for="end_date" class="form-label">Hasta</label>
+                    <input type="date" class="form-control" id="end_date" name="end_date" value="{{ filters.end_date }}">
+                </div>
+                
+                {# MODIFICACIÓN: Mostrar el filtro de piloto solo si el usuario es administrador #}
+                {% if session.get('role') == 'admin' %}
+                <div class="col-md-3">
+                    <label for="pilot_id" class="form-label">Piloto</label>
+                    <select class="form-select" id="pilot_id" name="pilot_id">
+                        <option value="">Todos los Pilotos</option>
+                        {% for pilot in pilots %}
+                        <option value="{{ pilot.id }}" {% if filters.pilot_id|string == pilot.id|string %}selected{% endif %}>
+                            {{ pilot.full_name }}
+                        </option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-2">
+                {% else %}
+                {# Si no es admin, ajustamos el ancho de la columna de matrícula #}
+                <div class="col-md-5">
+                {% endif %}
+                
+                    <label for="vehicle_plate" class="form-label">Matrícula</label>
+                    <input type="text" class="form-control" id="vehicle_plate" name="vehicle_plate" value="{{ filters.vehicle_plate }}" placeholder="Ej: C123456">
+                </div>
+                <div class="col-md-1 d-grid">
+                    <button type="submit" class="btn btn-primary">Buscar</button>
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
 
-# Se cambia 'main.jinja_env.filters' a 'app.jinja_env.filters'
-app.jinja_env.filters['separator'] = format_thousand_separator
-# 🛠️ --- FIN FILTROS PERSONALIZADOS DE JINJA ---
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h3>Resultados ({{ reports | length }} reportes encontrados)</h3>
+    <a href="{{ url_for('export_reports') }}?{{ request.query_string.decode() }}" class="btn btn-success">
+        💾 Exportar a CSV
+    </a>
+</div>
 
-# --- Decoradores ---
-
-def admin_required(f):
-    """Decorador para restringir el acceso solo a usuarios con rol 'admin'."""
-    @functools.wraps(f)
-    def decorated_function(*args, **kwargs):
-        if session.get('role') != 'admin':
-            flash('Acceso denegado. Se requiere ser administrador.', 'danger')
-            return redirect(url_for('home'))
-        return f(*args, **kwargs)
-    return decorated_function
-
-def login_required(f):
-    """Decorador para restringir el acceso a usuarios no autenticados."""
-    @functools.wraps(f)
-    def decorated_function(*args, **kwargs):
-        if 'user_id' not in session:
-            flash('Por favor, inicie sesión para acceder.', 'warning')
-            return redirect(url_for('login'))
-        return f(*args, **kwargs)
-    return decorated_function
-
-# --- Rutas de Autenticación y Home ---
-
-# Se cambia '@main.route' a '@app.route' en todas las rutas
-@app.route('/')
-def home():
-    if 'user_id' in session:
-        if session.get('role') == 'admin':
-            return render_template('admin_base.html')
-        elif session.get('role') == 'piloto':
-            return redirect(url_for('pilot_form'))
-    return redirect(url_for('login'))
-
-@app.route('/login', methods=['GET', 'POST'])
-def login():
-    if request.method == 'POST':
-        username = request.form['username']
-        password = request.form['password']
-        
-        user = db_manager.get_user_by_credentials(username, password)
-
-        if user and user.get('is_active') == 1:
-            session['user_id'] = user['id']
-            session['user_name'] = user['full_name']
-            session['role'] = user['role']
-            flash(f"Bienvenido, {user['full_name']}!", 'success')
-            return redirect(url_for('home'))
-        elif user and user.get('is_active') == 0:
-            flash("Su cuenta ha sido deshabilitada. Contacte al administrador.", 'danger')
-        else:
-            flash('Usuario o contraseña incorrectos.', 'danger')
-            
-    return render_template('login.html')
-
-@app.route('/logout')
-def logout():
-    session.clear()
-    flash('Sesión cerrada correctamente.', 'info')
-    return redirect(url_for('login'))
-
-# --- Rutas de Piloto ---
-
-@app.route('/pilot/form', methods=['GET', 'POST'])
-@login_required
-def pilot_form():
-    if session.get('role') != 'piloto':
-        flash('Acceso denegado.', 'danger')
-        return redirect(url_for('home'))
-        
-    pilot_data = db_manager.load_pilot_data(session['user_id'])
-    
-    if not pilot_data or not pilot_data.get('plate'):
-        return render_template('pilot_form.html', error="No tiene un vehículo asignado. Contacte a su administrador.", pilot_data=None)
-
-    if request.method == 'POST':
-        try:
-            # 1. Recoger datos generales
-            km_actual = float(request.form['km_actual'])
-            observations = request.form.get('observations', '')
-            signature_confirmation = request.form.get('signature_confirmation')
-            
-            # Recoger los nuevos campos del PDF
-            promo_marca = request.form.get('promo_marca', '')
-            fecha_inicio = request.form.get('fecha_inicio', '')
-            fecha_finalizacion = request.form.get('fecha_finalizacion', '')
-            tipo_licencia = request.form.get('tipo_licencia', '')
-            vencimiento_licencia = request.form.get('vencimiento_licencia', '')
-            tarjeta_seguro = request.form.get('tarjeta_seguro', '')
-            km_proximo_servicio = request.form.get('km_proximo_servicio', '')
-            fecha_servicio_anterior = request.form.get('fecha_servicio_anterior', '')
-
-
-            # 2. Recoger datos del encabezado (Header Data)
-            report_data = {
-                'plate': pilot_data['plate'],
-                'brand': pilot_data['brand'],
-                'model': pilot_data['model'],
-                'km_actual': km_actual,
-                # Se incluyen los nuevos datos
-                'promo_marca': promo_marca,
-                'fecha_inicio': fecha_inicio,
-                'fecha_finalizacion': fecha_finalizacion,
-                'tipo_licencia': tipo_licencia,
-                'vencimiento_licencia': vencimiento_licencia,
-                'tarjeta_seguro': tarjeta_seguro,
-                'km_proximo_servicio': km_proximo_servicio,
-                'fecha_servicio_anterior': fecha_servicio_anterior,
-            }
-
-            # 3. Recoger resultados del checklist
-            checklist_results = {}
-            for category, items in CHECKLIST_ITEMS:
-                for item in items:
-                    # Construcción de la clave de formulario limpia
-                    form_key = 'check_' + item.replace(' ', '_').replace('/', '_').replace('(', '').replace(')', '').replace(',', '').replace('-', '').replace('.', '')
+{% if reports %}
+<div class="table-responsive">
+    <table class="table table-striped table-hover align-middle">
+        <thead class="table-dark">
+            <tr>
+                <th>ID</th>
+                <th>Fecha/Hora</th>
+                
+                {# MODIFICACIÓN: Mostrar la columna Piloto solo si el usuario es administrador #}
+                {% if session.get('role') == 'admin' %}
+                <th>Piloto</th>
+                {% endif %}
+                
+                <th>Matrícula</th>
+                <th>KM</th>
+                <th>Obs.</th>
+                <th>Acciones</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for report in reports %}
+            <tr>
+                <td>{{ report.id }}</td>
+                <td>{{ report.report_date.split(' ')[0] }}<br><small class="text-muted">{{ report.report_date.split(' ')[1] }}</small></td>
+                
+                {# MODIFICACIÓN: Mostrar el dato del Piloto solo si el usuario es administrador #}
+                {% if session.get('role') == 'admin' %}
+                <td>{{ report.pilot_name }}</td>
+                {% endif %}
+                
+                <td>{{ report.vehicle_plate }}</td>
+                <td>{{ report.km_actual | int | separator }}</td>
+                <td> 
+                    {% if report.observations %}
+                        <span class="badge bg-warning text-dark">SÍ</span>
+                    {% else %}
+                        <span class="badge bg-secondary">NO</span>
+                    {% endif %}
+                </td>
+                <td>
+                    <button class="btn btn-sm btn-info" onclick='showReportDetail({{ report | tojson | safe }})'>Detalle</button>
                     
-                    if form_key in request.form:
-                        checklist_results[item] = request.form[form_key]
-                    else:
-                        raise ValueError(f"Falta seleccionar el estado para el ítem: {item}")
-            
-            # 4. Guardar en la DB
-            db_manager.save_report_web(
-                session['user_id'], 
-                report_data, 
-                checklist_results, 
-                observations, 
-                signature_confirmation
-            )
-            
-            flash('Reporte de inspección guardado exitosamente.', 'success')
-            return redirect(url_for('pilot_form'))
+                    {# SEGURIDAD: Mostrar Eliminar SOLO si es administrador #}
+                    {% if session.get('role') == 'admin' %}
+                    <form method="POST" style="display:inline;" action="{{ url_for('delete_report_web', report_id=report.id) }}" onsubmit="return confirm('¿Está seguro de que desea eliminar este reporte?')">
+                        <button type="submit" class="btn btn-sm btn-danger">Eliminar</button>
+                    </form>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<div class="alert alert-info" role="alert">
+    No se encontraron reportes con los filtros aplicados.
+</div>
+{% endif %}
+{% endblock %}
 
-        except ValueError as e:
-            flash(f'Error de validación: {e}', 'danger')
-        except Exception as e:
-            flash(f'Error al guardar el reporte: {e}', 'danger')
-            
-    return render_template('pilot_form.html', pilot_data=pilot_data, checklist=CHECKLIST_ITEMS)
+{% block scripts %}
+<div class="modal fade" id="detailModal" tabindex="-1" aria-labelledby="detailModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header bg-primary text-white">
+                <h5 class="modal-title" id="detailModalLabel">Detalle del Reporte #...</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body" id="detail-body">
+                </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cerrar</button>
+            </div>
+        </div>
+    </div>
+</div>
 
-# --- Rutas de Administración (Usuarios y Vehículos) ---
+<script>
+    function showReportDetail(report) {
+        if (!report || !report.header_data || !report.checklist_data) {
+            console.error("Reporte no válido o datos incompletos.");
+            document.getElementById('detail-body').innerHTML = '<div class="alert alert-danger">Error: Datos de reporte no encontrados o inválidos.</div>';
+            return;
+        }
 
-@app.route('/admin/pilots', methods=['GET', 'POST'])
-@admin_required
-def manage_pilots_web():
-    if request.method == 'POST':
-        action = request.form.get('action')
-        user_id = request.form.get('user_id')
+        const header_data = report.header_data;
+        const checklist = report.checklist_data;
         
-        try:
-            if action == 'add':
-                db_manager.manage_user_web(
-                    action, 
-                    full_name=request.form['full_name'], 
-                    username=request.form['username'], 
-                    password=request.form['password']
-                )
-                flash('Piloto añadido exitosamente.', 'success')
-            elif action in ['delete', 'toggle_status']:
-                status = request.form.get('status')
-                db_manager.manage_user_web(action, user_id=user_id, status=status)
-                flash(f'Piloto {action} exitosamente.', 'success')
+        // Función para formatear el KM con separador de miles
+        function formatKilometers(value) {
+            if (value === null || value === undefined || isNaN(value)) {
+                return 'N/A';
+            }
+            // Simula el filtro 'separator' de Jinja: convierte a string, añade comas para miles y las reemplaza por puntos.
+            let formatted = parseInt(value).toLocaleString('en-US'); // Usa comas para miles
+            return formatted.replace(/,/g, '.') + ' KM'; // Reemplaza comas por puntos y añade 'KM'
+        }
+
+        let html = `
+            <h6>Datos del Reporte</h6>
+            <table class="table table-sm table-borderless">
+                <tr><th>Reporte ID:</th><td>${report.id}</td></tr>
+                <tr><th>Fecha:</th><td>${report.report_date}</td></tr>
+                <tr><th>Piloto:</th><td>${report.pilot_name}</td></tr>
+                <tr><th>Vehículo:</th><td>${report.vehicle_plate} (${header_data.brand || 'N/A'} ${header_data.model || 'N/A'})</td></tr>
+                <tr><th>Kilometraje Actual:</th><td>${formatKilometers(report.km_actual)}</td></tr>
+                <tr><th>Observaciones:</th><td>${report.observations || 'N/A'}</td></tr>
+                <tr><th>Confirmación de Piloto:</th><td>${header_data.signature_confirmation || 'PENDIENTE'}</td></tr>
+            </table>
             
-        except ValueError as e:
-            flash(f"Error: {e}", 'danger')
-        except Exception as e:
-            flash(f"Error inesperado: {e}", 'danger')
-
-    users = db_manager.get_all_pilots()
-    return render_template('admin_pilots.html', users=users)
-
-
-@app.route('/admin/vehicles', methods=['GET', 'POST'])
-@admin_required
-def manage_vehicles_web():
-    if request.method == 'POST':
-        action = request.form.get('action')
-        plate = request.form.get('plate')
+            <hr>
+            <h6>Datos de Logística y Servicio</h6>
+            <table class="table table-sm table-borderless">
+                <tr><th>Marca a Promocionar:</th><td>${header_data.promo_marca || 'N/A'}</td></tr>
+                <tr><th>Fecha Inicio Campaña:</th><td>${header_data.fecha_inicio || 'N/A'}</td></tr>
+                <tr><th>Fecha Finalización Campaña:</th><td>${header_data.fecha_finalizacion || 'N/A'}</td></tr>
+                <tr><th>Tipo de Licencia:</th><td>${header_data.tipo_licencia || 'N/A'}</td></tr>
+                <tr><th>Vencimiento Licencia:</th><td>${header_data.vencimiento_licencia || 'N/A'}</td></tr>
+                <tr><th>Tarjeta Seguro:</th><td>${header_data.tarjeta_seguro || 'N/A'}</td></tr>
+                <tr><th>KM Próximo Servicio:</th><td>${formatKilometers(header_data.km_proximo_servicio)}</td></tr>
+                <tr><th>Fecha Servicio Anterior:</th><td>${header_data.fecha_servicio_anterior || 'N/A'}</td></tr>
+            </table>
+            
+            <hr>
+            <h6>Resultados del Checklist</h6>
+            <table class="table table-bordered table-sm">
+                <thead>
+                    <tr>
+                        <th style="width: 70%;">Ítem</th>
+                        <th>Resultado</th>
+                    </tr>
+                </thead>
+                <tbody>
+        `;
         
-        try:
-            if action == 'add':
-                db_manager.manage_vehicle(
-                    action,
-                    plate=plate,
-                    brand=request.form['brand'],
-                    model=request.form['model'],
-                    year=request.form['year'],
-                    capacity_kg=request.form['capacity_kg']
-                )
-                flash('Vehículo añadido exitosamente.', 'success')
-            elif action == 'update':
-                db_manager.manage_vehicle(
-                    action,
-                    plate=plate,
-                    brand=request.form['brand'],
-                    model=request.form['model'],
-                    year=request.form['year'],
-                    capacity_kg=request.form['capacity_kg']
-                )
-                flash('Vehículo actualizado exitosamente.', 'success')
-            elif action == 'assign':
-                db_manager.manage_vehicle(
-                    action,
-                    plate=plate,
-                    assign_pilot_id=request.form['pilot_id']
-                )
-                flash('Piloto asignado exitosamente.', 'success')
-            elif action == 'unassign':
-                db_manager.manage_vehicle(action, plate=plate)
-                flash('Piloto desasignado exitosamente.', 'success')
-            elif action == 'delete':
-                db_manager.manage_vehicle(action, plate=plate)
-                flash('Vehículo eliminado exitosamente.', 'success')
-            
-        except ValueError as e:
-            flash(f"Error: {e}", 'danger')
-        except Exception as e:
-            flash(f"Error inesperado: {e}", 'danger')
+        // Generar filas para el checklist
+        for (const [item, status] of Object.entries(checklist)) {
+            let badge = '';
+            // Verificamos 'OK', 'Falla', 'N/A' que son los valores que se guardan.
+            if (status === 'OK') { 
+                badge = '<span class="badge bg-success">OK</span>';
+            } else if (status === 'Falla') { 
+                badge = '<span class="badge bg-danger">FALLA</span>';
+            } else { 
+                badge = '<span class="badge bg-secondary">N/A</span>';
+            }
+            html += `
+                <tr>
+                    <td>${item}</td>
+                    <td>${badge}</td>
+                </tr>
+            `;
+        }
+        
+        html += `
+                </tbody>
+            </table>
+        `;
+        
+        // Actualizar el título y cuerpo del modal
+        document.getElementById('detailModalLabel').innerText = `Detalle de Reporte #${report.id}`;
+        document.getElementById('detail-body').innerHTML = html;
 
-    vehicles = db_manager.get_all_vehicles()
-    pilots = db_manager.get_all_pilots()
-    return render_template('admin_vehicles.html', vehicles=vehicles, pilots=pilots)
-
-
-# --- Rutas de Reportes ---
-
-@app.route('/admin/reports', methods=['GET'])
-@login_required
-def review_reports_web():
-    """Muestra la interfaz de revisión de reportes con filtros y paginación."""
-    
-    # 1. Obtener filtros de la URL (request.args)
-    start_date = request.args.get('start_date')
-    end_date = request.args.get('end_date')
-    pilot_id_str = request.args.get('pilot_id')
-    pilot_id = int(pilot_id_str) if pilot_id_str and pilot_id_str.isdigit() else None
-    plate = request.args.get('plate')
-    
-    # Guardar los filtros para pasarlos de vuelta a la plantilla
-    filters = {
-        'start_date': start_date if start_date else '',
-        'end_date': end_date if end_date else '',
-        'pilot_id': pilot_id_str if pilot_id_str else '',
-        'plate': plate if plate else ''
+        // Mostrar el modal
+        var detailModal = new bootstrap.Modal(document.getElementById('detailModal'));
+        detailModal.show();
     }
-
-    # 2. Obtener datos filtrados
-    try:
-        reports = db_manager.get_filtered_reports(start_date, end_date, pilot_id, plate)
-        pilots = db_manager.get_all_pilots()
-        vehicles = db_manager.get_all_vehicles()
-    except Exception as e:
-        flash(f"Error al cargar datos: {e}", 'danger')
-        reports = []
-        pilots = []
-        vehicles = []
-        
-    # 3. Serializar reportes para el JavaScript (reports_json)
-    reports_json = json.dumps(reports, default=str) # default=str es crucial para fechas/horas de psycopg2
-    
-    # 4. Renderizar la plantilla
-    return render_template('admin_reports.html', 
-                            reports=reports, 
-                            pilots=pilots, 
-                            vehicles=vehicles,
-                            filters=filters,
-                            reports_json=reports_json)
-
-
-@app.route('/admin/reports/delete/<int:report_id>', methods=['POST'])
-@admin_required
-def delete_report_web(report_id):
-    """
-    Ruta para eliminar un reporte específico por su ID.
-    """
-    try:
-        db_manager.delete_report(report_id)
-        flash(f'Reporte ID {report_id} eliminado exitosamente.', 'success')
-    except Exception as e:
-        flash(f'Error al eliminar el reporte: {e}', 'danger')
-        
-    return redirect(url_for('review_reports_web'))
-
-
-@app.route('/admin/reports/export', methods=['GET'])
-@admin_required
-def export_reports():
-    """Exporta los reportes filtrados a un archivo CSV."""
-    
-    # 1. Obtener filtros de la URL
-    start_date = request.args.get('start_date')
-    end_date = request.args.get('end_date')
-    pilot_id_str = request.args.get('pilot_id')
-    pilot_id = int(pilot_id_str) if pilot_id_str and pilot_id_str.isdigit() else None
-    plate = request.args.get('plate')
-    
-    # 2. Obtener los datos filtrados
-    try:
-        reports = db_manager.get_filtered_reports(start_date, end_date, pilot_id, plate)
-    except Exception as e:
-        flash(f"Error al exportar datos: {e}", 'danger')
-        return redirect(url_for('review_reports_web'))
-
-    # 3. Preparar la respuesta CSV
-    output = io.StringIO()
-    writer = csv.writer(output)
-    
-    # Encabezados del CSV
-    writer.writerow([
-        'ID_Reporte', 'Fecha_Reporte', 'Piloto', 'ID_Piloto', 'Placa_Vehiculo', 
-        'KM_Actual', 'Observaciones', 'Header_JSON', 'Checklist_JSON'
-    ])
-
-    # 4. Datos 
-    for report in reports:
-        # Asegúrate de que las claves existan y convierte JSON a string para el CSV
-        row = [
-            report['id'],
-            report['report_date'], 
-            report['pilot_name'], 
-            report['driver_id'], 
-            report['vehicle_plate'], 
-            report['km_actual'],
-            report['observations'], 
-            json.dumps(report['header_data'], default=str), # Usar default=str
-            json.dumps(report['checklist_data'], default=str)
-        ]
-        writer.writerow(row)
-
-    # 5. Crear el objeto Response para la descarga
-    response = make_response(output.getvalue())
-    response.headers['Content-Type'] = 'text/csv'
-    response.headers['Content-Disposition'] = 'attachment; filename=reportes_inspeccion.csv'
-    return response
-
-# --- Ejecución de la App (Inicialización de la DB) ---
-
-# Asegúrate de que la DB se inicialice antes de correr la app.
-# El error de conexión fallará la ejecución en este punto si las variables de Vercel son incorrectas.
-try:
-    db_manager.inicializar_db()
-except Exception as e:
-    # Registra el error pero permite que la app intente iniciarse (si el problema es solo temporal)
-    # Sin embargo, si la conexión es CRÍTICA para el inicio, lo ideal sería que falle aquí.
-    print(f"ERROR CRÍTICO DE CONEXIÓN EN INICIALIZACIÓN: {e}")
-    # Nota: Si este error es fatal, Vercel registrará un error 500.
-
-# El objeto 'app' ya está disponible globalmente y Vercel lo detectará.
+</script>
+{% endblock %}
