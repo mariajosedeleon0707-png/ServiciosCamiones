@@ -257,7 +257,7 @@ def manage_vehicles_web():
 # --- Rutas de Reportes ---
 
 @app.route('/admin/reports', methods=['GET'])
-@admin_required
+@login_required
 def review_reports_web():
     """Muestra la interfaz de revisión de reportes con filtros y paginación."""
     
