@@ -20,6 +20,9 @@
                     <label for="end_date" class="form-label">Hasta</label>
                     <input type="date" class="form-control" id="end_date" name="end_date" value="{{ filters.end_date }}">
                 </div>
+                
+                {# MODIFICACIÓN: Mostrar el filtro de piloto solo si el usuario es administrador #}
+                {% if current_user.is_admin %}
                 <div class="col-md-3">
                     <label for="pilot_id" class="form-label">Piloto</label>
                     <select class="form-select" id="pilot_id" name="pilot_id">
@@ -31,7 +34,12 @@
                         {% endfor %}
                     </select>
                 </div>
-                 <div class="col-md-2">
+                <div class="col-md-2">
+                {% else %}
+                {# Si no es admin, ajustamos el ancho de la columna de matrícula #}
+                <div class="col-md-5">
+                {% endif %}
+                
                     <label for="vehicle_plate" class="form-label">Matrícula</label>
                     <input type="text" class="form-control" id="vehicle_plate" name="vehicle_plate" value="{{ filters.vehicle_plate }}" placeholder="Ej: C123456">
                 </div>
@@ -57,7 +65,12 @@
             <tr>
                 <th>ID</th>
                 <th>Fecha/Hora</th>
+                
+                {# MODIFICACIÓN: Mostrar la columna Piloto solo si el usuario es administrador #}
+                {% if current_user.is_admin %}
                 <th>Piloto</th>
+                {% endif %}
+                
                 <th>Matrícula</th>
                 <th>KM</th>
                 <th>Obs.</th>
@@ -69,9 +82,14 @@
             <tr>
                 <td>{{ report.id }}</td>
                 <td>{{ report.report_date.split(' ')[0] }}<br><small class="text-muted">{{ report.report_date.split(' ')[1] }}</small></td>
+                
+                {# MODIFICACIÓN: Mostrar el dato del Piloto solo si el usuario es administrador #}
+                {% if current_user.is_admin %}
                 <td>{{ report.pilot_name }}</td>
+                {% endif %}
+                
                 <td>{{ report.vehicle_plate }}</td>
-                <td>{{ report.km_actual | int | separator }}</td> 
+                <td>{{ report.km_actual | int | separator }}</td>
                 <td> 
                     {% if report.observations %}
                         <span class="badge bg-warning text-dark">SÍ</span>
