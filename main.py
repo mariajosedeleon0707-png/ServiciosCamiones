@@ -254,18 +254,17 @@ def manage_vehicles_web():
     return render_template('admin_vehicles.html', vehicles=vehicles, pilots=pilots)
 
 
-# --- Rutas de Reportes (Corregidas) ---
+# --- Rutas de Reportes (Seguridad y Conversión de Fecha Corregida) ---
 
 @app.route('/admin/reports', methods=['GET'])
 @login_required 
 def admin_reports():
-    # ... (código de obtención de filtros y seguridad) ...
+    # 1. Obtener filtros y definir seguridad
     start_date = request.args.get('start_date')
     end_date = request.args.get('end_date')
     pilot_id_str = request.args.get('pilot_id')
     plate = request.args.get('plate')
     
-    # Obtener el rol del usuario actual
     is_admin = session.get('role') == 'admin'
     pilot_id = int(pilot_id_str) if pilot_id_str and pilot_id_str.isdigit() else None
     pilots = [] 
@@ -286,88 +285,37 @@ def admin_reports():
         'plate': plate if plate else ''
     }
 
-    # 3. Obtener datos filtrados
+    # 3. Obtener datos filtrados y PROCESAR FECHAS
     try:
         reports = db_manager.get_filtered_reports(start_date, end_date, pilot_id, plate)
         
-        # === CORRECCIÓN CLAVE AQUÍ: Conversión de Timestamp a String ===
+        # === CORRECCIÓN DE TIMESTAMP A STRING PARA JINJA (Resuelve el UndefinedError) ===
         reports_processed = []
         for report in reports:
-            # Verifica si el objeto tiene el método strftime (típico de datetime/Timestamp)
+            # Si report_date es un objeto Timestamp, lo convertimos a string
             if hasattr(report['report_date'], 'strftime'):
-                # Convierte la fecha/hora a un string en el formato deseado
                 report['report_date'] = report['report_date'].strftime('%Y-%m-%d %H:%M:%S')
             
             reports_processed.append(report)
-        # ===============================================================
+        # =================================================================================
 
     except Exception as e:
         flash(f"Error al cargar datos: {e}", 'danger')
         reports_processed = []
-
+        
     # 4. Serializar reportes para el JavaScript (reports_json)
-    # Usamos reports_processed y 'default=str' como respaldo
     reports_json = json.dumps(reports_processed, default=str) 
         
     # 5. Renderizar la plantilla
     return render_template('admin_reports.html', 
-                            reports=reports_processed, # Pasamos la lista procesada
+                            reports=reports_processed, 
                             pilots=pilots, 
                             filters=filters,
                             reports_json=reports_json)
 
 
-@app.route('/admin/reports/export', methods=['GET'])
-@login_required 
-def export_reports():
-    # ... (código de filtros y seguridad) ...
-    start_date = request.args.get('start_date')
-    end_date = request.args.get('end_date')
-    pilot_id_str = request.args.get('pilot_id')
-    plate = request.args.get('plate')
-    
-    is_admin = session.get('role') == 'admin'
-    pilot_id = int(pilot_id_str) if pilot_id_str and pilot_id_str.isdigit() else None
-    
-    if not is_admin:
-        pilot_id = session['user_id']
-    
-    # 2. Obtener los datos filtrados
-    try:
-        reports = db_manager.get_filtered_reports(start_date, end_date, pilot_id, plate)
-        
-        # === CORRECCIÓN CLAVE AQUÍ: Conversión de Timestamp a String ===
-        # Necesario para que el writer.writerow funcione con un string limpio
-        for report in reports:
-            if hasattr(report['report_date'], 'strftime'):
-                report['report_date'] = report['report_date'].strftime('%Y-%m-%d %H:%M:%S')
-        # ===============================================================
-
-    except Exception as e:
-        flash(f"Error al exportar datos: {e}", 'danger')
-        return redirect(url_for('admin_reports'))
-
-    # ... (El resto del código de exportación CSV sigue igual) ...
-    output = io.StringIO()
-    writer = csv.writer(output)
-    
-    # ...
-    
-    # Datos 
-    for report in reports: # reports ahora contiene strings en report_date
-        row = [
-            report['id'],
-            report['report_date'], # Ahora es un string
-            # ...
-        ]
-        writer.writerow(row)
-
-    # ...
-    return response
-
-
 @app.route('/admin/reports/delete/<int:report_id>', methods=['POST'])
-@admin_required # ¡ESTRICTO!: Solo administradores pueden eliminar.
+@admin_required 
 def delete_report_web(report_id):
     """
     Ruta para eliminar un reporte específico por su ID.
@@ -378,37 +326,39 @@ def delete_report_web(report_id):
     except Exception as e:
         flash(f'Error al eliminar el reporte: {e}', 'danger')
         
-    return redirect(url_for('admin_reports')) # Usamos el endpoint correcto
+    return redirect(url_for('admin_reports'))
 
 
 @app.route('/admin/reports/export', methods=['GET'])
-@login_required # Permite a pilotos exportar, pero solo sus datos.
+@login_required 
 def export_reports():
     """Exporta los reportes filtrados a un archivo CSV."""
     
-    # 1. Obtener filtros de la URL
+    # 1. Obtener filtros y seguridad (igual que admin_reports)
     start_date = request.args.get('start_date')
     end_date = request.args.get('end_date')
     pilot_id_str = request.args.get('pilot_id')
     plate = request.args.get('plate')
     
-    # --- LÓGICA DE SEGURIDAD (Exportación) ---
     is_admin = session.get('role') == 'admin'
     pilot_id = int(pilot_id_str) if pilot_id_str and pilot_id_str.isdigit() else None
     
     if not is_admin:
-        # Si el usuario NO es administrador (es piloto), 
-        # forzamos el filtro a su propio ID.
         pilot_id = session['user_id']
-    # --- FIN LÓGICA DE SEGURIDAD ---
     
-    # 2. Obtener los datos filtrados
+    # 2. Obtener datos filtrados y PROCESAR FECHAS
     try:
-        # Usamos el pilot_id definitivo
         reports = db_manager.get_filtered_reports(start_date, end_date, pilot_id, plate)
+        
+        # === CONVERSIÓN DE TIMESTAMP A STRING para el CSV y JSON ===
+        for report in reports:
+            if hasattr(report['report_date'], 'strftime'):
+                report['report_date'] = report['report_date'].strftime('%Y-%m-%d %H:%M:%S')
+        # ===========================================================
+
     except Exception as e:
         flash(f"Error al exportar datos: {e}", 'danger')
-        return redirect(url_for('admin_reports')) # Usamos el endpoint correcto
+        return redirect(url_for('admin_reports')) 
 
     # 3. Preparar la respuesta CSV
     output = io.StringIO()
@@ -422,7 +372,7 @@ def export_reports():
 
     # 4. Datos 
     for report in reports:
-        # Asegúrate de que las claves existan y convierte JSON a string para el CSV
+        # report['report_date'] ahora es un string limpio
         row = [
             report['id'],
             report['report_date'], 
@@ -431,27 +381,20 @@ def export_reports():
             report['vehicle_plate'], 
             report['km_actual'],
             report['observations'], 
-            json.dumps(report['header_data'], default=str), # Usar default=str
+            json.dumps(report['header_data'], default=str),
             json.dumps(report['checklist_data'], default=str)
         ]
         writer.writerow(row)
 
     # 5. Crear el objeto Response para la descarga
     response = make_response(output.getvalue())
-    response.headers['Content-Type'] = 'text/csv'
+    response.headers['Content-Type'] = 'text/csv']
     response.headers['Content-Disposition'] = 'attachment; filename=reportes_inspeccion.csv'
     return response
 
 # --- Ejecución de la App (Inicialización de la DB) ---
 
-# Asegúrate de que la DB se inicialice antes de correr la app.
-# El error de conexión fallará la ejecución en este punto si las variables de Vercel son incorrectas.
 try:
     db_manager.inicializar_db()
 except Exception as e:
-    # Registra el error pero permite que la app intente iniciarse (si el problema es solo temporal)
-    # Sin embargo, si la conexión es CRÍTICA para el inicio, lo ideal sería que falle aquí.
     print(f"ERROR CRÍTICO DE CONEXIÓN EN INICIALIZACIÓN: {e}")
-    # Nota: Si este error es fatal, Vercel registrará un error 500.
-
-# El objeto 'app' ya está disponible globalmente y Vercel lo detectará.
