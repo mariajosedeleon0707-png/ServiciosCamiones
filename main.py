@@ -388,7 +388,7 @@ def export_reports():
 
     # 5. Crear el objeto Response para la descarga
     response = make_response(output.getvalue())
-    response.headers['Content-Type'] = 'text/csv']
+    response.headers['Content-Type'] = 'text/csv'
     response.headers['Content-Disposition'] = 'attachment; filename=reportes_inspeccion.csv'
     return response
 
