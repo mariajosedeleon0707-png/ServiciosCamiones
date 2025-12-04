@@ -10,7 +10,7 @@
         Filtros de Búsqueda
     </div>
     <div class="card-body">
-        <form method="GET" action="{{ url_for('admin_reports') }}"> {# Aseguramos que action use el endpoint 'admin_reports' #}
+        <form method="GET" action="{{ url_for('admin_reports') }}"> {# Endpoint correcto #}
             <div class="row g-3 align-items-end">
                 <div class="col-md-3">
                     <label for="start_date" class="form-label">Desde</label>
@@ -22,7 +22,7 @@
                 </div>
                 
                 {# MODIFICACIÓN: Mostrar el filtro de piloto solo si el usuario es administrador #}
-                {% if current_user.is_admin %}
+                {% if session.get('role') == 'admin' %}
                 <div class="col-md-3">
                     <label for="pilot_id" class="form-label">Piloto</label>
                     <select class="form-select" id="pilot_id" name="pilot_id">
@@ -67,7 +67,7 @@
                 <th>Fecha/Hora</th>
                 
                 {# MODIFICACIÓN: Mostrar la columna Piloto solo si el usuario es administrador #}
-                {% if current_user.is_admin %}
+                {% if session.get('role') == 'admin' %}
                 <th>Piloto</th>
                 {% endif %}
                 
@@ -84,7 +84,7 @@
                 <td>{{ report.report_date.split(' ')[0] }}<br><small class="text-muted">{{ report.report_date.split(' ')[1] }}</small></td>
                 
                 {# MODIFICACIÓN: Mostrar el dato del Piloto solo si el usuario es administrador #}
-                {% if current_user.is_admin %}
+                {% if session.get('role') == 'admin' %}
                 <td>{{ report.pilot_name }}</td>
                 {% endif %}
                 
@@ -100,9 +100,12 @@
                 <td>
                     <button class="btn btn-sm btn-info" onclick='showReportDetail({{ report | tojson | safe }})'>Detalle</button>
                     
+                    {# SEGURIDAD: Mostrar Eliminar SOLO si es administrador #}
+                    {% if session.get('role') == 'admin' %}
                     <form method="POST" style="display:inline;" action="{{ url_for('delete_report_web', report_id=report.id) }}" onsubmit="return confirm('¿Está seguro de que desea eliminar este reporte?')">
                         <button type="submit" class="btn btn-sm btn-danger">Eliminar</button>
                     </form>
+                    {% endif %}
                 </td>
             </tr>
             {% endfor %}
@@ -144,6 +147,16 @@
         const header_data = report.header_data;
         const checklist = report.checklist_data;
         
+        // Función para formatear el KM con separador de miles
+        function formatKilometers(value) {
+            if (value === null || value === undefined || isNaN(value)) {
+                return 'N/A';
+            }
+            // Simula el filtro 'separator' de Jinja: convierte a string, añade comas para miles y las reemplaza por puntos.
+            let formatted = parseInt(value).toLocaleString('en-US'); // Usa comas para miles
+            return formatted.replace(/,/g, '.') + ' KM'; // Reemplaza comas por puntos y añade 'KM'
+        }
+
         let html = `
             <h6>Datos del Reporte</h6>
             <table class="table table-sm table-borderless">
@@ -151,7 +164,7 @@
                 <tr><th>Fecha:</th><td>${report.report_date}</td></tr>
                 <tr><th>Piloto:</th><td>${report.pilot_name}</td></tr>
                 <tr><th>Vehículo:</th><td>${report.vehicle_plate} (${header_data.brand || 'N/A'} ${header_data.model || 'N/A'})</td></tr>
-                <tr><th>Kilometraje Actual:</th><td>${report.km_actual} KM</td></tr>
+                <tr><th>Kilometraje Actual:</th><td>${formatKilometers(report.km_actual)}</td></tr>
                 <tr><th>Observaciones:</th><td>${report.observations || 'N/A'}</td></tr>
                 <tr><th>Confirmación de Piloto:</th><td>${header_data.signature_confirmation || 'PENDIENTE'}</td></tr>
             </table>
@@ -165,7 +178,7 @@
                 <tr><th>Tipo de Licencia:</th><td>${header_data.tipo_licencia || 'N/A'}</td></tr>
                 <tr><th>Vencimiento Licencia:</th><td>${header_data.vencimiento_licencia || 'N/A'}</td></tr>
                 <tr><th>Tarjeta Seguro:</th><td>${header_data.tarjeta_seguro || 'N/A'}</td></tr>
-                <tr><th>KM Próximo Servicio:</th><td>${header_data.km_proximo_servicio || 'N/A'}</td></tr>
+                <tr><th>KM Próximo Servicio:</th><td>${formatKilometers(header_data.km_proximo_servicio)}</td></tr>
                 <tr><th>Fecha Servicio Anterior:</th><td>${header_data.fecha_servicio_anterior || 'N/A'}</td></tr>
             </table>
             
