@@ -254,17 +254,12 @@ def manage_vehicles_web():
     return render_template('admin_vehicles.html', vehicles=vehicles, pilots=pilots)
 
 
-# --- Rutas de Reportes (Seguridad implementada aquí) ---
+# --- Rutas de Reportes (Corregidas) ---
 
 @app.route('/admin/reports', methods=['GET'])
-@login_required # Permite acceso a Pilotos y Admins
-def admin_reports(): # Usamos 'admin_reports' como nombre de endpoint para Jinja
-    """
-    Muestra la interfaz de revisión de reportes con filtros y seguridad por rol.
-    Los pilotos solo ven sus propios reportes.
-    """
-    
-    # 1. Obtener filtros de la URL (request.args)
+@login_required 
+def admin_reports():
+    # ... (código de obtención de filtros y seguridad) ...
     start_date = request.args.get('start_date')
     end_date = request.args.get('end_date')
     pilot_id_str = request.args.get('pilot_id')
@@ -272,25 +267,18 @@ def admin_reports(): # Usamos 'admin_reports' como nombre de endpoint para Jinja
     
     # Obtener el rol del usuario actual
     is_admin = session.get('role') == 'admin'
-    
-    # Convertir pilot_id a int si existe y es válido
     pilot_id = int(pilot_id_str) if pilot_id_str and pilot_id_str.isdigit() else None
-    pilots = [] # Inicializamos la lista de pilotos
+    pilots = [] 
 
-    # --- LÓGICA DE SEGURIDAD (Visualización) ---
     if not is_admin:
-        # El usuario es un PILOTO: Forzamos el filtro a su propio ID.
         pilot_id = session['user_id']
         pilot_id_str = str(session['user_id']) 
     else:
-        # El usuario es ADMINISTRADOR: Cargamos la lista de pilotos para el filtro.
         try:
             pilots = db_manager.get_all_pilots()
         except Exception:
             pilots = []
-    # --- FIN LÓGICA DE SEGURIDAD ---
-
-    # 2. Guardar los filtros para pasarlos de vuelta a la plantilla
+            
     filters = {
         'start_date': start_date if start_date else '',
         'end_date': end_date if end_date else '',
@@ -300,21 +288,82 @@ def admin_reports(): # Usamos 'admin_reports' como nombre de endpoint para Jinja
 
     # 3. Obtener datos filtrados
     try:
-        # Usamos el pilot_id definitivo (el del admin o el forzado del piloto)
         reports = db_manager.get_filtered_reports(start_date, end_date, pilot_id, plate)
+        
+        # === CORRECCIÓN CLAVE AQUÍ: Conversión de Timestamp a String ===
+        reports_processed = []
+        for report in reports:
+            # Verifica si el objeto tiene el método strftime (típico de datetime/Timestamp)
+            if hasattr(report['report_date'], 'strftime'):
+                # Convierte la fecha/hora a un string en el formato deseado
+                report['report_date'] = report['report_date'].strftime('%Y-%m-%d %H:%M:%S')
+            
+            reports_processed.append(report)
+        # ===============================================================
+
     except Exception as e:
         flash(f"Error al cargar datos: {e}", 'danger')
-        reports = []
-        
+        reports_processed = []
+
     # 4. Serializar reportes para el JavaScript (reports_json)
-    reports_json = json.dumps(reports, default=str)
+    # Usamos reports_processed y 'default=str' como respaldo
+    reports_json = json.dumps(reports_processed, default=str) 
         
     # 5. Renderizar la plantilla
     return render_template('admin_reports.html', 
-                            reports=reports, 
+                            reports=reports_processed, # Pasamos la lista procesada
                             pilots=pilots, 
                             filters=filters,
                             reports_json=reports_json)
+
+
+@app.route('/admin/reports/export', methods=['GET'])
+@login_required 
+def export_reports():
+    # ... (código de filtros y seguridad) ...
+    start_date = request.args.get('start_date')
+    end_date = request.args.get('end_date')
+    pilot_id_str = request.args.get('pilot_id')
+    plate = request.args.get('plate')
+    
+    is_admin = session.get('role') == 'admin'
+    pilot_id = int(pilot_id_str) if pilot_id_str and pilot_id_str.isdigit() else None
+    
+    if not is_admin:
+        pilot_id = session['user_id']
+    
+    # 2. Obtener los datos filtrados
+    try:
+        reports = db_manager.get_filtered_reports(start_date, end_date, pilot_id, plate)
+        
+        # === CORRECCIÓN CLAVE AQUÍ: Conversión de Timestamp a String ===
+        # Necesario para que el writer.writerow funcione con un string limpio
+        for report in reports:
+            if hasattr(report['report_date'], 'strftime'):
+                report['report_date'] = report['report_date'].strftime('%Y-%m-%d %H:%M:%S')
+        # ===============================================================
+
+    except Exception as e:
+        flash(f"Error al exportar datos: {e}", 'danger')
+        return redirect(url_for('admin_reports'))
+
+    # ... (El resto del código de exportación CSV sigue igual) ...
+    output = io.StringIO()
+    writer = csv.writer(output)
+    
+    # ...
+    
+    # Datos 
+    for report in reports: # reports ahora contiene strings en report_date
+        row = [
+            report['id'],
+            report['report_date'], # Ahora es un string
+            # ...
+        ]
+        writer.writerow(row)
+
+    # ...
+    return response
 
 
 @app.route('/admin/reports/delete/<int:report_id>', methods=['POST'])
