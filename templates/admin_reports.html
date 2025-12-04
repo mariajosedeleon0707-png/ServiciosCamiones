@@ -10,7 +10,7 @@
         Filtros de Búsqueda
     </div>
     <div class="card-body">
-        <form method="GET" action="{{ url_for('review_reports_web') }}">
+        <form method="GET" action="{{ url_for('admin_reports') }}"> {# Aseguramos que action use el endpoint 'admin_reports' #}
             <div class="row g-3 align-items-end">
                 <div class="col-md-3">
                     <label for="start_date" class="form-label">Desde</label>
