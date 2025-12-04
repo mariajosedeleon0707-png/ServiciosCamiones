@@ -92,7 +92,8 @@
                                                 {% endif %}
                                                 <td>{{ item }}</td>
                                                 {# Genera la clave normalizada para que coincida con la lógica de app.py #}
-                                                {% set input_name = 'check_' + item | replace(' ', '_') | replace('/', '_') | replace('(', '') | replace(')', '') | replace(',', '') | replace('-', '') %}
+                                                {# 💥 CORRECCIÓN: Se agrega | replace('.', '') para limpiar el punto y sincronizar con main.py #}
+                                                {% set input_name = 'check_' + item | replace(' ', '_') | replace('/', '_') | replace('(', '') | replace(')', '') | replace(',', '') | replace('-', '') | replace('.', '') %}
                                                 <td class="text-center">
                                                     <input type="radio" name="{{ input_name }}" value="Buen estado" required>
                                                 </td>
