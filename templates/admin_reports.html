@@ -81,7 +81,7 @@
             {% for report in reports %}
             <tr>
                 <td>{{ report.id }}</td>
-                <td>{{ report.report_date.split(' ')[0] }}<br><small class="text-muted">{{ report.report_date.split(' ')[1] }}</small></td>
+           <td>{{ report.report_date.split(' ')[0] }}<br><small class="text-muted">{{ report.report_date.split(' ')[1] }}</small></td>
                 
                 {# MODIFICACIÓN: Mostrar el dato del Piloto solo si el usuario es administrador #}
                 {% if session.get('role') == 'admin' %}
