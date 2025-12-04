@@ -1,4 +1,4 @@
- import json
+import json
 import functools
 import io
 import csv
@@ -109,12 +109,28 @@ def pilot_form():
 
     if request.method == 'POST':
         try:
-            # 1. Recoger datos generales
-            km_actual = float(request.form['km_actual'])
-            observations = request.form.get('observations', '')
-            signature_confirmation = request.form.get('signature_confirmation')
+            # 1. VALIDACIÓN Y RECOLECCIÓN DE DATOS GENERALES
             
-            # Recoger los nuevos campos
+            # --- KM Actual (Validación Numérica y de Vacío) ---
+            km_actual_str = request.form.get('km_actual')
+            if not km_actual_str:
+                raise ValueError("El campo Kilometraje Actual es obligatorio.")
+            try:
+                # Convertir a float después de la validación
+                km_actual = float(km_actual_str)
+            except ValueError:
+                raise ValueError("El Kilometraje Actual debe ser un número válido.")
+            # ----------------------------------------------------
+            
+            observations = request.form.get('observations', '')
+            
+            # --- Firma (Validación de Obligatoriedad) ---
+            signature_confirmation = request.form.get('signature_confirmation')
+            if signature_confirmation is None: # Si el checkbox no fue marcado, es None
+                raise ValueError("Debe confirmar con la firma (checkbox) para enviar el reporte.")
+            # ------------------------------------------
+
+            # Recoger los demás campos, asumiendo que son opcionales si no se validan aquí.
             promo_marca = request.form.get('promo_marca', '')
             fecha_inicio = request.form.get('fecha_inicio', '')
             fecha_finalizacion = request.form.get('fecha_finalizacion', '')
@@ -156,10 +172,10 @@ def pilot_form():
                         estado_normalizado = estado_value.lower().strip() 
 
                         if estado_normalizado not in ESTADOS_VALIDOS_NORMALIZADOS:
-                            # Se lanza el error con el valor exacto recibido para ayudar al debug
+                            # Se lanza el error si no es 'buen estado' ni 'mal estado' (incluye el error de N/A)
                             raise ValueError(f"ERROR DE CALIFICACIÓN: El ítem '{item}' debe ser calificado como 'Buen Estado' o 'Mal Estado'. Se detectó un valor no permitido: '{estado_value}'.")
                         
-                        # Se guarda el valor original recibido del formulario para mayor fidelidad en el JSON
+                        # Se guarda el valor original recibido del formulario
                         checklist_results[item] = estado_value 
                     else:
                         # Esto atrapa el caso en que un ítem obligatorio no fue seleccionado
