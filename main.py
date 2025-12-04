@@ -3,14 +3,17 @@ import functools
 import io
 import csv
 from flask import Flask, render_template, request, redirect, url_for, session, flash, make_response
+# Importaciones de módulos locales (config y db_manager)
 from config import SECRET_KEY, CHECKLIST_ITEMS 
-# es para que funcione
 import db_manager 
 
 # --- Inicialización de la Aplicación ---
-# ¡CORRECCIÓN CLAVE para Vercel! Se usa 'app' en lugar de 'main'
 app = Flask(__name__)
 app.secret_key = SECRET_KEY 
+
+# --- CONSTANTE DE ESTADOS VÁLIDOS ---
+ESTADOS_VALIDOS = ["Buen Estado", "Mal Estado"]
+# ------------------------------------
 
 # 🛠️ --- FILTROS PERSONALIZADOS DE JINJA ---
 def format_thousand_separator(value):
@@ -25,7 +28,6 @@ def format_thousand_separator(value):
     except (ValueError, TypeError):
         return str(value) 
 
-# Se cambia 'main.jinja_env.filters' a 'app.jinja_env.filters'
 app.jinja_env.filters['separator'] = format_thousand_separator
 # 🛠️ --- FIN FILTROS PERSONALIZADOS DE JINJA ---
 
@@ -53,7 +55,6 @@ def login_required(f):
 
 # --- Rutas de Autenticación y Home ---
 
-# Se cambia '@main.route' a '@app.route' en todas las rutas
 @app.route('/')
 def home():
     if 'user_id' in session:
@@ -111,7 +112,7 @@ def pilot_form():
             observations = request.form.get('observations', '')
             signature_confirmation = request.form.get('signature_confirmation')
             
-            # Recoger los nuevos campos del PDF
+            # Recoger los nuevos campos
             promo_marca = request.form.get('promo_marca', '')
             fecha_inicio = request.form.get('fecha_inicio', '')
             fecha_finalizacion = request.form.get('fecha_finalizacion', '')
@@ -139,7 +140,7 @@ def pilot_form():
                 'fecha_servicio_anterior': fecha_servicio_anterior,
             }
 
-            # 3. Recoger resultados del checklist
+            # 3. Recoger resultados del checklist y APLICAR VALIDACIÓN ESTRICTA
             checklist_results = {}
             for category, items in CHECKLIST_ITEMS:
                 for item in items:
@@ -147,9 +148,16 @@ def pilot_form():
                     form_key = 'check_' + item.replace(' ', '_').replace('/', '_').replace('(', '').replace(')', '').replace(',', '').replace('-', '').replace('.', '')
                     
                     if form_key in request.form:
-                        checklist_results[item] = request.form[form_key]
+                        estado_value = request.form[form_key]
+                        
+                        # 🌟 VALIDACIÓN ESTRICTA: SOLO PERMITIR BUEN ESTADO O MAL ESTADO
+                        if estado_value not in ESTADOS_VALIDOS:
+                            raise ValueError(f"ERROR DE CALIFICACIÓN: El ítem '{item}' debe ser calificado como 'Buen Estado' o 'Mal Estado'. Se detectó un valor no permitido: '{estado_value}'.")
+                        
+                        checklist_results[item] = estado_value
                     else:
-                        raise ValueError(f"Falta seleccionar el estado para el ítem: {item}")
+                        # Esto atrapa el caso en que un ítem obligatorio no fue seleccionado
+                        raise ValueError(f"Falta seleccionar el estado para el ítem obligatorio: {item}")
             
             # 4. Guardar en la DB
             db_manager.save_report_web(
@@ -397,4 +405,9 @@ def export_reports():
 try:
     db_manager.inicializar_db()
 except Exception as e:
+    # Esto evita que la aplicación se caiga si falla la conexión a la DB, 
+    # pero permite que las rutas arrojen el error apropiado.
     print(f"ERROR CRÍTICO DE CONEXIÓN EN INICIALIZACIÓN: {e}")
+
+# Comentario: La ejecución de la app se maneja con gunicorn en Vercel, 
+# por eso no se incluye el 'if __name__ == "__main__":'
