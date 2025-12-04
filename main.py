@@ -1,4 +1,4 @@
-import json
+ import json
 import functools
 import io
 import csv
@@ -13,6 +13,8 @@ app.secret_key = SECRET_KEY
 
 # --- CONSTANTE DE ESTADOS VÁLIDOS ---
 ESTADOS_VALIDOS = ["Buen Estado", "Mal Estado"]
+# Se pre-normalizan los estados válidos para una validación más rápida y robusta
+ESTADOS_VALIDOS_NORMALIZADOS = [s.lower().strip() for s in ESTADOS_VALIDOS]
 # ------------------------------------
 
 # 🛠️ --- FILTROS PERSONALIZADOS DE JINJA ---
@@ -140,7 +142,7 @@ def pilot_form():
                 'fecha_servicio_anterior': fecha_servicio_anterior,
             }
 
-            # 3. Recoger resultados del checklist y APLICAR VALIDACIÓN ESTRICTA
+            # 3. Recoger resultados del checklist y APLICAR VALIDACIÓN ESTRICTA (CORREGIDA)
             checklist_results = {}
             for category, items in CHECKLIST_ITEMS:
                 for item in items:
@@ -150,11 +152,15 @@ def pilot_form():
                     if form_key in request.form:
                         estado_value = request.form[form_key]
                         
-                        # 🌟 VALIDACIÓN ESTRICTA: SOLO PERMITIR BUEN ESTADO O MAL ESTADO
-                        if estado_value not in ESTADOS_VALIDOS:
+                        # 🌟 CORRECCIÓN CLAVE: Normalizar el valor recibido para la validación
+                        estado_normalizado = estado_value.lower().strip() 
+
+                        if estado_normalizado not in ESTADOS_VALIDOS_NORMALIZADOS:
+                            # Se lanza el error con el valor exacto recibido para ayudar al debug
                             raise ValueError(f"ERROR DE CALIFICACIÓN: El ítem '{item}' debe ser calificado como 'Buen Estado' o 'Mal Estado'. Se detectó un valor no permitido: '{estado_value}'.")
                         
-                        checklist_results[item] = estado_value
+                        # Se guarda el valor original recibido del formulario para mayor fidelidad en el JSON
+                        checklist_results[item] = estado_value 
                     else:
                         # Esto atrapa el caso en que un ítem obligatorio no fue seleccionado
                         raise ValueError(f"Falta seleccionar el estado para el ítem obligatorio: {item}")
@@ -408,6 +414,3 @@ except Exception as e:
     # Esto evita que la aplicación se caiga si falla la conexión a la DB, 
     # pero permite que las rutas arrojen el error apropiado.
     print(f"ERROR CRÍTICO DE CONEXIÓN EN INICIALIZACIÓN: {e}")
-
-# Comentario: La ejecución de la app se maneja con gunicorn en Vercel, 
-# por eso no se incluye el 'if __name__ == "__main__":'
