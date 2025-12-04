@@ -24,7 +24,7 @@
                         <a class="nav-link" href="{{ url_for('manage_vehicles_web') }}">Vehículos</a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('review_reports_web') }}">Reportes</a>
+                        <a class="nav-link" href="{{ url_for('admin_reports') }}">Reportes</a>
                     </li>
                     {% elif session.get('role') == 'piloto' %}
                     <li class="nav-item">
