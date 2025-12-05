@@ -81,7 +81,7 @@
             {% for report in reports %}
             <tr>
                 <td>{{ report.id }}</td>
-           <td>{{ report.report_date.split(' ')[0] }}<br><small class="text-muted">{{ report.report_date.split(' ')[1] }}</small></td>
+            <td>{{ report.report_date.split(' ')[0] }}<br><small class="text-muted">{{ report.report_date.split(' ')[1] }}</small></td>
                 
                 {# MODIFICACIÓN: Mostrar el dato del Piloto solo si el usuario es administrador #}
                 {% if session.get('role') == 'admin' %}
@@ -138,23 +138,28 @@
 
 <script>
     function showReportDetail(report) {
-        if (!report || !report.header_data || !report.checklist_data) {
-            console.error("Reporte no válido o datos incompletos.");
-            document.getElementById('detail-body').innerHTML = '<div class="alert alert-danger">Error: Datos de reporte no encontrados o inválidos.</div>';
+        // 🚨 CORRECCIÓN CRÍTICA: Se usa 'checklist_details' (lista de objetos) en lugar de 'checklist_data' (objeto simple).
+        const checklist_details_list = report.checklist_details;
+        
+        // Verificación de datos
+        if (!report || !report.header_data || !checklist_details_list) {
+            console.error("Reporte no válido o datos incompletos.", report);
+            document.getElementById('detail-body').innerHTML = '<div class="alert alert-danger">Error: Datos de reporte no encontrados o inválidos. Confirme la migración de la columna `checklist_data` y revise la consulta en db_manager.</div>';
+            var detailModal = new bootstrap.Modal(document.getElementById('detailModal'));
+            detailModal.show();
             return;
         }
 
         const header_data = report.header_data;
-        const checklist = report.checklist_data;
         
         // Función para formatear el KM con separador de miles
         function formatKilometers(value) {
             if (value === null || value === undefined || isNaN(value)) {
                 return 'N/A';
             }
-            // Simula el filtro 'separator' de Jinja: convierte a string, añade comas para miles y las reemplaza por puntos.
-            let formatted = parseInt(value).toLocaleString('en-US'); // Usa comas para miles
-            return formatted.replace(/,/g, '.') + ' KM'; // Reemplaza comas por puntos y añade 'KM'
+            // Usa el formato local y luego reemplaza las comas por puntos (formato común en español)
+            let formatted = parseFloat(value).toLocaleString('es-ES', { minimumFractionDigits: 0, maximumFractionDigits: 1 });
+            return formatted.replace(/,/g, '.') + ' KM';
         }
 
         let html = `
@@ -166,7 +171,7 @@
                 <tr><th>Vehículo:</th><td>${report.vehicle_plate} (${header_data.brand || 'N/A'} ${header_data.model || 'N/A'})</td></tr>
                 <tr><th>Kilometraje Actual:</th><td>${formatKilometers(report.km_actual)}</td></tr>
                 <tr><th>Observaciones:</th><td>${report.observations || 'N/A'}</td></tr>
-                <tr><th>Confirmación de Piloto:</th><td>${header_data.signature_confirmation || 'PENDIENTE'}</td></tr>
+                <tr><th>Confirmación de Piloto:</th><td>${header_data.signature_confirmation || 'CONFIRMADO'}</td></tr>
             </table>
             
             <hr>
@@ -178,8 +183,8 @@
                 <tr><th>Tipo de Licencia:</th><td>${header_data.tipo_licencia || 'N/A'}</td></tr>
                 <tr><th>Vencimiento Licencia:</th><td>${header_data.vencimiento_licencia || 'N/A'}</td></tr>
                 <tr><th>Tarjeta Seguro:</th><td>${header_data.tarjeta_seguro || 'N/A'}</td></tr>
-                <tr><th>KM Próximo Servicio:</th><td>${formatKilometers(header_data.km_proximo_servicio)}</td></tr>
-                <tr><th>Fecha Servicio Anterior:</th><td>${header_data.fecha_servicio_anterior || 'N/A'}</td></tr>
+                <tr><th>KM Próximo Servicio:</th><td>${formatKilometers(report.km_proximo_servicio || header_data.km_proximo_servicio)}</td></tr>
+                <tr><th>Fecha Servicio Anterior:</th><td>${report.fecha_servicio_anterior || header_data.fecha_servicio_anterior || 'N/A'}</td></tr>
             </table>
             
             <hr>
@@ -194,24 +199,27 @@
                 <tbody>
         `;
         
-        // Generar filas para el checklist
-        for (const [item, status] of Object.entries(checklist)) {
+        // 🚨 CORRECCIÓN 2 y 3: Iterar sobre la lista de objetos 'checklist_details_list' y usar los nuevos estados
+        checklist_details_list.forEach(detail => {
+            const item = detail.item;
+            const status = detail.estado; // Valores de la BD: 'Buen Estado', 'Mal Estado', 'N/A'
             let badge = '';
-            // Verificamos 'OK', 'Falla', 'N/A' que son los valores que se guardan.
-            if (status === 'OK') { 
-                badge = '<span class="badge bg-success">OK</span>';
-            } else if (status === 'Falla') { 
-                badge = '<span class="badge bg-danger">FALLA</span>';
-            } else { 
+
+            if (status === 'Buen Estado') { 
+                badge = '<span class="badge bg-success">Buen Estado</span>';
+            } else if (status === 'Mal Estado') { 
+                badge = '<span class="badge bg-danger">Mal Estado</span>';
+            } else { 
                 badge = '<span class="badge bg-secondary">N/A</span>';
             }
+            
             html += `
                 <tr>
                     <td>${item}</td>
                     <td>${badge}</td>
                 </tr>
             `;
-        }
+        });
         
         html += `
                 </tbody>
