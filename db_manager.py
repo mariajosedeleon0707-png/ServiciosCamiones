@@ -40,7 +40,7 @@ def get_db_connection():
         print(f"Error de conexión a PostgreSQL. Revise la variable DATABASE_URL: {e}")
         raise ConnectionError(f"No se pudo conectar a la base de datos: {e}")
 
-# --- Funciones de Inicialización (DDL) ---
+# --- Funciones de Inicialización (DDL y Migraciones) ---
 
 def inicializar_db():
     """Crea todas las tablas necesarias si no existen y asegura el usuario 'admin'."""
@@ -83,7 +83,7 @@ def inicializar_db():
         $$;
     """)
     
-    # 4. TABLA CENTRAL DE REPORTES (Datos Generales, de Servicio y Header Data en JSONB)
+    # 4. TABLA CENTRAL DE REPORTES (Estructura actual)
     cur.execute("""
         CREATE TABLE IF NOT EXISTS reports (
             id SERIAL PRIMARY KEY,
@@ -94,29 +94,39 @@ def inicializar_db():
             km_proximo_servicio REAL,
             fecha_servicio_anterior DATE,
             observations TEXT,
-            header_data JSONB NOT NULL, -- Datos de Promoción/Licencia/Seguro
+            header_data JSONB NOT NULL,
             FOREIGN KEY (driver_id) REFERENCES users(id) ON DELETE CASCADE,
             FOREIGN KEY (vehicle_plate) REFERENCES vehicles(plate) ON DELETE CASCADE
         );
     """)
 
-    # 🌟 CORRECCIÓN CRÍTICA: MIGRACIÓN DE COLUMNAS PARA REPORTS 
-    # Añade las columnas si no existen (solución al error anterior)
+    # 🌟 BLOQUE DE MIGRACIONES Y CORRECCIÓN DE ESQUEMA 🌟
+    
+    # 4.1. MIGRACIÓN: Añadir km_proximo_servicio (solución a "column does not exist")
     try:
-        # Añadir km_proximo_servicio si no existe
         cur.execute("SELECT km_proximo_servicio FROM reports LIMIT 0;")
     except psycopg2.ProgrammingError:
-        conn.rollback() # Limpiar el error
+        conn.rollback()
         cur.execute("ALTER TABLE reports ADD COLUMN km_proximo_servicio REAL;")
         print("MIGRACIÓN: Columna 'km_proximo_servicio' añadida a 'reports'.")
     
+    # 4.2. MIGRACIÓN: Añadir fecha_servicio_anterior (solución a "column does not exist")
     try:
-        # Añadir fecha_servicio_anterior si no existe
         cur.execute("SELECT fecha_servicio_anterior FROM reports LIMIT 0;")
     except psycopg2.ProgrammingError:
-        conn.rollback() # Limpiar el error
+        conn.rollback()
         cur.execute("ALTER TABLE reports ADD COLUMN fecha_servicio_anterior DATE;")
         print("MIGRACIÓN: Columna 'fecha_servicio_anterior' añadida a 'reports'.")
+
+    # 4.3. MIGRACIÓN CRÍTICA: Eliminar columna obsoleta checklist_data (solución a "violates not-null constraint")
+    try:
+        cur.execute("SELECT checklist_data FROM reports LIMIT 0;")
+        conn.rollback() 
+        cur.execute("ALTER TABLE reports DROP COLUMN checklist_data;")
+        print("MIGRACIÓN: Columna obsoleta 'checklist_data' eliminada de 'reports'.")
+    except psycopg2.ProgrammingError:
+        conn.rollback()
+        pass 
     # ----------------------------------------------------------------------
     
     # 5. TABLA DE DETALLES DE LA CHECKLIST (Relacional 1:N con reports)
@@ -319,7 +329,7 @@ def save_report_web(driver_id, header_data, checklist_results, observations, sig
         
     try:
         # 1. INSERTAR REGISTRO PRINCIPAL EN REPORTS y obtener el ID
-        # 🟢 CORRECCIÓN DE report_date: Se usa NOW() directamente
+        # NOTA: report_date se incluye explícitamente con NOW() para evitar errores de restricción NOT NULL
         cur.execute("""
             INSERT INTO reports (
                 driver_id, vehicle_plate, km_actual, observations, header_data,
@@ -355,7 +365,8 @@ def save_report_web(driver_id, header_data, checklist_results, observations, sig
         conn.commit()
     except Exception as e:
         conn.rollback()
-        raise Exception(f"Error al guardar el reporte: {e}")
+        # Se lanza la excepción para que Flask la capture y muestre el error
+        raise Exception(f"Error al guardar el reporte: {e}") 
     finally:
         conn.close()
 
@@ -368,7 +379,6 @@ def get_filtered_reports(start_date=None, end_date=None, pilot_id=None, plate=No
     conn = get_db_connection()
     
     # Consulta principal: Une reports con users y subconsulta los detalles de la checklist.
-    # Esta consulta ya es correcta y busca los campos que añadimos: km_proximo_servicio y fecha_servicio_anterior
     query = """
     SELECT
         r.id, r.report_date, u.full_name AS pilot_name, r.driver_id, r.vehicle_plate,
@@ -408,6 +418,7 @@ def get_filtered_reports(start_date=None, end_date=None, pilot_id=None, plate=No
         
         # Deserialización JSONB
         if 'header_data' in df.columns:
+            # pd.read_sql_query devuelve strings para JSONB, necesitan deserialización
             df['header_data'] = df['header_data'].apply(lambda x: json.loads(x) if isinstance(x, str) else x)
         
         reports_list = df.to_dict('records')
