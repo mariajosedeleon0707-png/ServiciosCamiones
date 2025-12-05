@@ -100,6 +100,25 @@ def inicializar_db():
             FOREIGN KEY (vehicle_plate) REFERENCES vehicles(plate) ON DELETE CASCADE
         );
     """)
+
+    # 🌟 CORRECCIÓN CRÍTICA: MIGRACIÓN DE COLUMNAS PARA REPORTS 
+    # Esto soluciona el error si la tabla 'reports' ya existía sin estas dos columnas.
+    try:
+        # Añadir km_proximo_servicio si no existe
+        cur.execute("SELECT km_proximo_servicio FROM reports LIMIT 0;")
+    except psycopg2.ProgrammingError:
+        conn.rollback() # Limpiar el error
+        cur.execute("ALTER TABLE reports ADD COLUMN km_proximo_servicio REAL;")
+        print("MIGRACIÓN: Columna 'km_proximo_servicio' añadida a 'reports'.")
+    
+    try:
+        # Añadir fecha_servicio_anterior si no existe
+        cur.execute("SELECT fecha_servicio_anterior FROM reports LIMIT 0;")
+    except psycopg2.ProgrammingError:
+        conn.rollback() # Limpiar el error
+        cur.execute("ALTER TABLE reports ADD COLUMN fecha_servicio_anterior DATE;")
+        print("MIGRACIÓN: Columna 'fecha_servicio_anterior' añadida a 'reports'.")
+    # ----------------------------------------------------------------------
     
     # 5. TABLA DE DETALLES DE LA CHECKLIST (Relacional 1:N con reports)
     cur.execute("""
