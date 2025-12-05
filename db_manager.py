@@ -10,19 +10,18 @@ from werkzeug.security import generate_password_hash, check_password_hash
 # --- Configuración y Dependencias ---
 try:
     from dotenv import load_dotenv
-    # Carga variables de .env localmente (será ignorado en entornos de producción como Vercel)
+    # Carga variables de .env localmente
     load_dotenv()
 except ImportError:
     pass
 
 try:
-    # Usado para la función de reportes filtrados y exportación
     import pandas as pd
 except ImportError:
     pass
 
 DATABASE_URL = os.environ.get('DATABASE_URL')
-POSTGRES_ACTIVE = True # Asumimos que psycopg2 está instalado si se va a usar esta clase
+POSTGRES_ACTIVE = True 
 
 # --- Funciones de Conexión ---
 
@@ -102,7 +101,7 @@ def inicializar_db():
     """)
 
     # 🌟 CORRECCIÓN CRÍTICA: MIGRACIÓN DE COLUMNAS PARA REPORTS 
-    # Esto soluciona el error si la tabla 'reports' ya existía sin estas dos columnas.
+    # Añade las columnas si no existen (solución al error anterior)
     try:
         # Añadir km_proximo_servicio si no existe
         cur.execute("SELECT km_proximo_servicio FROM reports LIMIT 0;")
@@ -192,7 +191,6 @@ def manage_user_web(action, **kwargs):
             full_name = kwargs['full_name']
             password = kwargs['password']
             
-            # Verificación de existencia (redundante con la clave UNIQUE, pero útil para feedback)
             cur.execute("SELECT id FROM users WHERE username = %s;", (username,))
             if cur.fetchone():
                 raise ValueError(f"El nombre de usuario '{username}' ya está en uso.")
@@ -247,7 +245,6 @@ def manage_vehicle(action, **kwargs):
     try:
         if action == 'add':
             plate = kwargs['plate']
-            # Validación de existencia...
             cur.execute("""
                 INSERT INTO vehicles (plate, brand, model, year, capacity_kg) 
                 VALUES (%s, %s, %s, %s, %s);
@@ -262,7 +259,6 @@ def manage_vehicle(action, **kwargs):
             
         elif action == 'assign':
             pilot_id = kwargs['assign_pilot_id']
-            # Desasigna la placa de cualquier otro piloto y luego asigna al piloto actual
             cur.execute("UPDATE vehicles SET assigned_pilot_id = NULL WHERE assigned_pilot_id = %s;", (pilot_id,))
             cur.execute("UPDATE vehicles SET assigned_pilot_id = %s WHERE plate = %s;", (pilot_id, plate))
             
@@ -323,11 +319,12 @@ def save_report_web(driver_id, header_data, checklist_results, observations, sig
         
     try:
         # 1. INSERTAR REGISTRO PRINCIPAL EN REPORTS y obtener el ID
+        # 🟢 CORRECCIÓN DE report_date: Se usa NOW() directamente
         cur.execute("""
             INSERT INTO reports (
                 driver_id, vehicle_plate, km_actual, observations, header_data,
-                km_proximo_servicio, fecha_servicio_anterior
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+                km_proximo_servicio, fecha_servicio_anterior, report_date
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())
             RETURNING id;
         """, (
             driver_id,
@@ -371,6 +368,7 @@ def get_filtered_reports(start_date=None, end_date=None, pilot_id=None, plate=No
     conn = get_db_connection()
     
     # Consulta principal: Une reports con users y subconsulta los detalles de la checklist.
+    # Esta consulta ya es correcta y busca los campos que añadimos: km_proximo_servicio y fecha_servicio_anterior
     query = """
     SELECT
         r.id, r.report_date, u.full_name AS pilot_name, r.driver_id, r.vehicle_plate,
@@ -406,14 +404,12 @@ def get_filtered_reports(start_date=None, end_date=None, pilot_id=None, plate=No
     query += " ORDER BY r.report_date DESC"
     
     try:
-        # Ejecutar consulta usando parámetros para prevenir inyección SQL
         df = pd.read_sql_query(query, conn, params=params)
         
         # Deserialización JSONB
         if 'header_data' in df.columns:
             df['header_data'] = df['header_data'].apply(lambda x: json.loads(x) if isinstance(x, str) else x)
         
-        # Convertir DataFrame a lista de diccionarios para ser usado en Flask/Jinja
         reports_list = df.to_dict('records')
         return reports_list
         
