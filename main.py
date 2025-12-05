@@ -12,7 +12,7 @@ app = Flask(__name__)
 app.secret_key = SECRET_KEY 
 
 # --- CONSTANTE DE ESTADOS VÁLIDOS ---
-# 🎉 CORRECCIÓN CLAVE: Se añade "N/A" a la lista de estados válidos.
+# 🎉 CORRECCIÓN FINAL: Se incluyen "N/A"
 ESTADOS_VALIDOS = ["Buen Estado", "Mal Estado", "N/A"] 
 # Se pre-normalizan los estados válidos para una validación más rápida y robusta
 ESTADOS_VALIDOS_NORMALIZADOS = [s.lower().strip() for s in ESTADOS_VALIDOS]
@@ -173,10 +173,12 @@ def pilot_form():
                         estado_normalizado = estado_value.lower().strip() 
 
                         if estado_normalizado not in ESTADOS_VALIDOS_NORMALIZADOS:
-                            # Se lanza el error si no es 'buen estado', 'mal estado' o 'n/a'
+                            # Se lanza el error si el valor no es válido. 
+                            # Se actualiza el mensaje para incluir "N/A"
                             raise ValueError(f"ERROR DE CALIFICACIÓN: El ítem '{item}' debe ser calificado como 'Buen Estado', 'Mal Estado' o 'N/A'. Se detectó un valor no permitido: '{estado_value}'.")
                         
                         # Se guarda el valor original recibido del formulario
+                        # Esto guarda 'Buen Estado', 'Mal Estado' o 'N/A' exactamente como se envió.
                         checklist_results[item] = estado_value 
                     else:
                         # Esto atrapa el caso en que un ítem obligatorio no fue seleccionado
