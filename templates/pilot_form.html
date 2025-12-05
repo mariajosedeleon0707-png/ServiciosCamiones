@@ -71,14 +71,14 @@
                         </div>
 
                         <div class="mb-4 p-3 border rounded">
-                            <h5 class="text-primary">Lista de Chequeo (Marcar: Buen estado, Mal estado o N/A)</h5>
+                            <h5 class="text-primary">Lista de Chequeo (Marcar: Buen Estado, Mal Estado o N/A)</h5>
                             <table class="table table-bordered table-sm">
                                 <thead class="table-info">
                                     <tr>
                                         <th>Categoría</th>
                                         <th>Ítem a evaluar</th>
-                                        <th class="text-center">Buen estado</th>
-                                        <th class="text-center">Mal estado</th>
+                                        <th class="text-center">Buen Estado</th>
+                                        <th class="text-center">Mal Estado</th>
                                         <th class="text-center">N/A</th>
                                     </tr>
                                 </thead>
@@ -92,13 +92,14 @@
                                                 {% endif %}
                                                 <td>{{ item }}</td>
                                                 {# Genera la clave normalizada para que coincida con la lógica de app.py #}
-                                                {# 💥 CORRECCIÓN: Se agrega | replace('.', '') para limpiar el punto y sincronizar con main.py #}
                                                 {% set input_name = 'check_' + item | replace(' ', '_') | replace('/', '_') | replace('(', '') | replace(')', '') | replace(',', '') | replace('-', '') | replace('.', '') %}
                                                 <td class="text-center">
-                                                    <input type="radio" name="{{ input_name }}" value="Buen estado" required>
+                                                    {# 🟢 CORRECCIÓN CLAVE: Se ajusta la capitalización a "Buen Estado" #}
+                                                    <input type="radio" name="{{ input_name }}" value="Buen Estado" required>
                                                 </td>
                                                 <td class="text-center">
-                                                    <input type="radio" name="{{ input_name }}" value="Mal estado" required>
+                                                    {# 🟢 CORRECCIÓN CLAVE: Se ajusta la capitalización a "Mal Estado" #}
+                                                    <input type="radio" name="{{ input_name }}" value="Mal Estado" required>
                                                 </td>
                                                 <td class="text-center">
                                                     <input type="radio" name="{{ input_name }}" value="N/A" required>
