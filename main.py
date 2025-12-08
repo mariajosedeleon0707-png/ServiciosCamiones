@@ -188,13 +188,14 @@ def manage_pilots_web():
             flash(f'Error de datos: {e}', 'danger')
         except Exception as e:
             flash(f'Error al gestionar piloto: {e}', 'danger')
-            return redirect(url_for('manage_pilots_web')) # Redirige incluso con error para mostrar flash
+            return redirect(url_for('manage_pilots_web'))
 
     # Lógica GET
     pilots_list = db_manager.get_all_pilots()
     
-    # 🛑 CRÍTICO: Envía la lista como 'users' para que coincida con tu HTML
-    return render_template('admin_pilots.html', users=pilots_list)
+    # 🛑 ESTO ENTRA EN CONFLICTO CON TU HTML: 
+    # La plantilla busca 'users', pero aquí se envía 'pilots'.
+    return render_template('admin_pilots.html', pilots=pilots_list)
 
 
 @app.route('/admin/vehicles', methods=['GET', 'POST'])
@@ -285,26 +286,12 @@ def manage_reports_web():
 @login_required
 @admin_required
 def view_report_detail(report_id):
-    # Por simplificación, la función get_filtered_reports devuelve una lista
-    # Usaremos esa misma función para obtener un reporte específico por su ID si es necesario,
-    # pero es mejor tener una función separada get_report_by_id en db_manager.
-    # Asumiendo que get_filtered_reports puede manejar el filtro solo por ID si fuera el caso,
-    # o si report_id se pasa como parámetro de filtro.
-
-    # Mejor: Adaptar la vista para que el reporte venga de la lista principal (si es posible)
-    # o crear una función específica en db_manager.
-    
+    # Esto es solo un placeholder, la lógica real requeriría una función get_report_by_id
     try:
-        # Esto es solo un placeholder, la lógica real requeriría una función get_report_by_id
-        # en db_manager o filtrar la lista completa. Para fines de demostración, 
-        # asumimos que puedes obtener los detalles del reporte.
-        
-        # Simulando obtener el reporte si db_manager no tiene get_report_by_id
         all_reports = db_manager.get_filtered_reports() 
         report = next((r for r in all_reports if r['id'] == report_id), None)
         
         if report:
-            # Puedes usar json.loads para asegurar que el JSONB se muestre correctamente
             report['header_data_formatted'] = json.dumps(report.get('header_data', {}), indent=2)
             report['checklist_details_formatted'] = json.dumps(report.get('checklist_details', []), indent=2)
 
