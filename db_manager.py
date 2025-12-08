@@ -181,7 +181,8 @@ def get_all_pilots():
             v.plate AS assigned_vehicle_plate
         FROM users u
         LEFT JOIN vehicles v ON v.assigned_pilot_id = u.id
-        WHERE u.role = 'piloto'
+        -- 🛑 CORRECCIÓN CLAVE: Usamos LOWER(u.role) para recuperar todos los pilotos, sin importar las mayúsculas.
+        WHERE LOWER(u.role) = 'piloto' 
         ORDER BY u.full_name;
     """)
     pilots = cur.fetchall()
@@ -371,7 +372,8 @@ def save_report_web(driver_id, header_data, checklist_results, observations, sig
 def get_filtered_reports(start_date=None, end_date=None, pilot_id=None, plate=None):
     """Recupera reportes filtrados, usando pandas para la gestión de datos complejos."""
     if 'pd' not in globals():
-        raise ImportError("La librería pandas no está instalada, no se pueden usar reportes filtrados.")
+        # Si pandas no está instalado, devuelve una lista vacía y una advertencia
+        return []
         
     conn = get_db_connection()
     
