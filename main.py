@@ -46,20 +46,18 @@ def admin_required(f):
 def format_thousand_separator(value):
     """Formatea un número con separadores de miles usando punto."""
     try:
-        # Convertir a entero y formatear con coma (separador por defecto en Python/US)
         formatted = f"{int(value):,}"
-        # Reemplazar la coma por un punto para el formato español/Latinoamericano
         return formatted.replace(',', '.')
     except (ValueError, TypeError):
         return str(value)
 
 app.jinja_env.filters['separator'] = format_thousand_separator
 
-# 🛠️ --- Rutas de Autenticación y Dashboard ---
+# 🛠️ --- Rutas de Autenticación y Home (Dashboard) ---
 
 @app.route('/')
 @login_required
-def dashboard():
+def home(): # 🌟 RENOMBRADO DE 'dashboard' A 'home' para coincidir con base.html
     """Ruta principal, redirige según el rol."""
     if session.get('role') == 'admin':
         return redirect(url_for('admin_reports')) # Redirige a reportes si es admin
@@ -71,7 +69,7 @@ def dashboard():
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if 'user_id' in session:
-        return redirect(url_for('dashboard'))
+        return redirect(url_for('home')) # 🌟 Usando 'home'
 
     if request.method == 'POST':
         username = request.form['username']
@@ -85,7 +83,7 @@ def login():
             session['full_name'] = user.get('full_name')
             session['role'] = user.get('role')
             flash(f'Bienvenido, {user.get("full_name")}!', 'success')
-            return redirect(url_for('dashboard'))
+            return redirect(url_for('home')) # 🌟 Usando 'home'
         elif user and user.get('is_active') == 0:
             flash("Su cuenta ha sido deshabilitada. Contacte al administrador.", 'danger')
         else:
@@ -106,7 +104,7 @@ def logout():
 def pilot_form():
     if session.get('role') != 'piloto':
         flash('Acceso denegado.', 'danger')
-        return redirect(url_for('dashboard'))
+        return redirect(url_for('home')) # 🌟 Usando 'home'
 
     pilot_data = db_manager.load_pilot_data(session['user_id'])
 
@@ -400,7 +398,6 @@ def export_reports():
             report['km_actual'],
             report['observations'],
             json.dumps(report['header_data'], default=str),
-            # Se usa 'checklist_details' que es la clave correcta de la DB
             json.dumps(report['checklist_details'], default=str)
         ]
         writer.writerow(row)
@@ -421,8 +418,6 @@ try:
     db_manager.inicializar_db()
     print("Base de datos inicializada/verificada.")
 except Exception as e:
-    # Esto evita que la aplicación se caiga si falla la conexión a la DB, 
-    # pero permite que las rutas arrojen el error apropiado.
     print(f"ERROR CRÍTICO DE CONEXIÓN EN INICIALIZACIÓN: {e}")
 
 if __name__ == '__main__':
