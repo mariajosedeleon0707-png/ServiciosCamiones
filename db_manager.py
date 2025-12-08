@@ -118,7 +118,6 @@ def inicializar_db():
 
     # 4.3. MIGRACIÓN CRÍTICA: Eliminar columna obsoleta checklist_data 
     try:
-        # Intenta seleccionar la columna. Si existe, la borra.
         cur.execute("SELECT checklist_data FROM reports LIMIT 0;")
         conn.rollback()
         cur.execute("ALTER TABLE reports DROP COLUMN checklist_data;")
@@ -309,9 +308,6 @@ def save_report_web(driver_id, header_data, checklist_results, observations, sig
     Guarda el reporte de inspección.
     Realiza una inserción en reports y una inserción masiva en detalles_inspeccion.
     """
-    # Se corrige la clave para la validación: 'signature_confirmation' debería ser el valor del checkbox
-    # Si el checkbox está marcado, el valor es 'on' o el valor especificado en el formulario.
-    # Asumimos que el front-end usa 'on' o True. Si es None o False, se lanza error.
     if not signature_confirmation:
         raise ValueError("Debe confirmar la inspección para guardar el reporte.")
 
@@ -367,7 +363,6 @@ def save_report_web(driver_id, header_data, checklist_results, observations, sig
         conn.commit()
     except Exception as e:
         conn.rollback()
-        # Se lanza la excepción para que Flask la capture y muestre el error
         raise Exception(f"Error al guardar el reporte: {e}")
     finally:
         conn.close()
@@ -416,20 +411,16 @@ def get_filtered_reports(start_date=None, end_date=None, pilot_id=None, plate=No
     query += " ORDER BY r.report_date DESC"
     
     try:
-        # Se usa RealDictCursor para obtener los resultados si pandas falla o no está disponible
         df = pd.read_sql_query(query, conn, params=params)
         
         # Deserialización JSONB
         if 'header_data' in df.columns:
-            # pd.read_sql_query devuelve strings para JSONB, necesitan deserialización
             df['header_data'] = df['header_data'].apply(lambda x: json.loads(x) if isinstance(x, str) else x)
         
         reports_list = df.to_dict('records')
         return reports_list
         
     except Exception as e:
-        # Si falla pandas o la consulta, usamos el método tradicional (solo si pandas no es crítico)
-        # Aquí se mantiene la excepción para forzar el uso de pandas, ya que es parte del diseño.
         raise Exception(f"Error al ejecutar consulta filtrada con pandas/psycopg2: {e}")
     finally:
         conn.close()
