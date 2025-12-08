@@ -15,7 +15,6 @@ app.secret_key = SECRET_KEY
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=1) 
 
 # --- CONSTANTE DE ESTADOS VÁLIDOS ---
-# Se pre-normalizan los estados válidos para una validación más rápida y robusta
 ESTADOS_VALIDOS = ["Buen Estado", "Mal Estado", "N/A"]
 ESTADOS_VALIDOS_NORMALIZADOS = [s.lower().strip() for s in ESTADOS_VALIDOS]
 # ------------------------------------
@@ -107,7 +106,7 @@ def logout():
 def pilot_form():
     if session.get('role') != 'piloto':
         flash('Acceso denegado.', 'danger')
-        return redirect(url_for('dashboard')) # CORREGIDO: Usar 'dashboard'
+        return redirect(url_for('dashboard'))
 
     pilot_data = db_manager.load_pilot_data(session['user_id'])
 
@@ -129,9 +128,10 @@ def pilot_form():
             observations = request.form.get('observations', '')
             
             signature_confirmation = request.form.get('signature_confirmation')
-            if signature_confirmation is None: # Si el checkbox no fue marcado, es None
+            if signature_confirmation is None:
                 raise ValueError("Debe confirmar con la firma (checkbox) para enviar el reporte.")
             
+            # Recoger los demás campos
             promo_marca = request.form.get('promo_marca', '')
             fecha_inicio = request.form.get('fecha_inicio', '')
             fecha_finalizacion = request.form.get('fecha_finalizacion', '')
@@ -257,8 +257,7 @@ def manage_vehicles_web():
                 )
                 flash('Vehículo añadido exitosamente.', 'success')
             elif action == 'assign':
-                # El formulario de vehicles usa 'pilot_id', no 'assign_pilot_id'
-                pilot_id = request.form.get('pilot_id') 
+                pilot_id = request.form.get('pilot_id')
                 db_manager.manage_vehicle(action, plate=plate, pilot_id=pilot_id)
                 flash(f'Vehículo asignado exitosamente.', 'success')
             elif action == 'delete':
@@ -384,7 +383,7 @@ def export_reports():
     output = io.StringIO()
     writer = csv.writer(output)
     
-    # Encabezados del CSV (CORREGIDO: Detalles_Checklist_JSON es la clave correcta)
+    # Encabezados del CSV
     writer.writerow([
         'ID_Reporte', 'Fecha_Reporte', 'Piloto', 'ID_Piloto', 'Placa_Vehiculo',
         'KM_Actual', 'Observaciones', 'Header_JSON', 'Detalles_Checklist_JSON'
