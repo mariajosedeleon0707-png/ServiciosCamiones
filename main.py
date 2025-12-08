@@ -1,10 +1,11 @@
 import os
+# Importación corregida: Aseguramos importar 'timedelta'
+from datetime import datetime, timedelta 
 from flask import Flask, render_template, request, redirect, url_for, session, flash, jsonify, Response
 from functools import wraps
 from werkzeug.exceptions import HTTPException
 import pandas as pd
 import csv
-from datetime import datetime
 
 # Importar configuración y DB Manager
 # Asegúrate de que config.py y db_manager.py estén en el mismo directorio.
@@ -14,7 +15,8 @@ import db_manager as db
 # --- Configuración de Flask ---
 app = Flask(__name__)
 app.secret_key = config.SECRET_KEY
-app.config['PERMANENT_SESSION_LIFETIME'] = datetime.timedelta(hours=1)
+# CORRECCIÓN: Usar timedelta directamente desde el módulo importado.
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=1) 
 
 # Lista de estados válidos normalizados para la validación
 ESTADOS_VALIDOS_NORMALIZADOS = ["Buen Estado", "Mal Estado", "N/A"]
@@ -385,6 +387,9 @@ def export_csv():
             flash('No hay datos para exportar con los filtros seleccionados.', 'info')
             return redirect(url_for('view_reports', **request.args))
             
+        # Importar StringIO aquí para asegurar que solo se necesite si la ruta se accede
+        from io import StringIO
+
         # Preparar encabezados estáticos y dinámicos (Checklist)
         static_headers = [
             'ID Reporte', 'Fecha Reporte (Guatemala)', 'Piloto', 'Placa', 
@@ -498,9 +503,5 @@ if __name__ == '__main__':
     except Exception as e:
         print(f"Error desconocido durante la inicialización de la DB: {e}")
         pass
-    
-    # Necesitas importar StringIO solo si lo vas a usar para la exportación. 
-    # Lo he movido aquí para evitar errores si no está disponible al inicio.
-    from io import StringIO
-    
+        
     app.run(debug=True)
