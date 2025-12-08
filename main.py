@@ -35,9 +35,10 @@ def admin_required(f):
     """Decorador para restringir el acceso solo a usuarios con rol 'admin'."""
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        if session.get('role') != 'admin':
+        # NOTA: Si el rol de admin en tu DB es 'a', debes cambiar 'admin' por 'a' aquí.
+        if session.get('role') not in ('admin', 'a'): 
             flash('Acceso denegado: Se requiere rol de Administrador.', 'danger')
-            return redirect(url_for('pilot_form')) # Redirigir a la vista de piloto
+            return redirect(url_for('pilot_form')) 
         return f(*args, **kwargs)
     return decorated_function
 
@@ -57,11 +58,14 @@ app.jinja_env.filters['separator'] = format_thousand_separator
 
 @app.route('/')
 @login_required
-def home(): # 🌟 RENOMBRADO DE 'dashboard' A 'home' para coincidir con base.html
+def home(): 
     """Ruta principal, redirige según el rol."""
-    if session.get('role') == 'admin':
-        return redirect(url_for('admin_reports')) # Redirige a reportes si es admin
-    elif session.get('role') == 'piloto':
+    # NOTA: Si el rol de admin es 'a' y piloto es 'p', debe reflejarse aquí.
+    user_role = session.get('role', '').lower()
+    
+    if user_role in ('admin', 'a'):
+        return redirect(url_for('admin_reports'))
+    elif user_role in ('piloto', 'p'):
         return redirect(url_for('pilot_form'))
     return redirect(url_for('logout'))
 
@@ -69,7 +73,7 @@ def home(): # 🌟 RENOMBRADO DE 'dashboard' A 'home' para coincidir con base.ht
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if 'user_id' in session:
-        return redirect(url_for('home')) # 🌟 Usando 'home'
+        return redirect(url_for('home'))
 
     if request.method == 'POST':
         username = request.form['username']
@@ -81,9 +85,9 @@ def login():
             session['user_id'] = user.get('id')
             session['username'] = user.get('username')
             session['full_name'] = user.get('full_name')
-            session['role'] = user.get('role')
+            session['role'] = user.get('role') # Guarda el rol tal como está en la DB ('p' o 'admin')
             flash(f'Bienvenido, {user.get("full_name")}!', 'success')
-            return redirect(url_for('home')) # 🌟 Usando 'home'
+            return redirect(url_for('home'))
         elif user and user.get('is_active') == 0:
             flash("Su cuenta ha sido deshabilitada. Contacte al administrador.", 'danger')
         else:
@@ -102,9 +106,10 @@ def logout():
 @app.route('/pilot_form', methods=['GET', 'POST'])
 @login_required
 def pilot_form():
-    if session.get('role') != 'piloto':
+    user_role = session.get('role', '').lower()
+    if user_role not in ('piloto', 'p'):
         flash('Acceso denegado.', 'danger')
-        return redirect(url_for('home')) # 🌟 Usando 'home'
+        return redirect(url_for('home'))
 
     pilot_data = db_manager.load_pilot_data(session['user_id'])
 
@@ -227,6 +232,7 @@ def manage_pilots_web():
         except Exception as e:
             flash(f"Error al procesar la solicitud: {e}", 'danger')
             
+    # 🛑 CORRECCIÓN: Se envía la variable 'pilots' que es la que trae los datos.
     return render_template('admin_pilots.html', pilots=pilots)
 
 
@@ -283,7 +289,8 @@ def admin_reports():
     pilot_id_str = request.args.get('pilot_id')
     plate = request.args.get('plate')
     
-    is_admin = session.get('role') == 'admin'
+    # NOTA: Usar 'a' y 'admin' para verificar el rol
+    is_admin = session.get('role', '').lower() in ('admin', 'a')
     pilot_id = int(pilot_id_str) if pilot_id_str and pilot_id_str.isdigit() else None
     pilots = []
 
@@ -354,7 +361,7 @@ def export_reports():
     pilot_id_str = request.args.get('pilot_id')
     plate = request.args.get('plate')
     
-    is_admin = session.get('role') == 'admin'
+    is_admin = session.get('role', '').lower() in ('admin', 'a')
     pilot_id = int(pilot_id_str) if pilot_id_str and pilot_id_str.isdigit() else None
     
     if not is_admin:
