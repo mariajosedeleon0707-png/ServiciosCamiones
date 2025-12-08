@@ -21,7 +21,7 @@ except ImportError:
     pass
 
 DATABASE_URL = os.environ.get('DATABASE_URL')
-POSTGRES_ACTIVE = True 
+POSTGRES_ACTIVE = True
 
 # --- Funciones de Conexión ---
 
@@ -89,7 +89,7 @@ def inicializar_db():
             id SERIAL PRIMARY KEY,
             driver_id INTEGER NOT NULL,
             vehicle_plate TEXT NOT NULL,
-            report_date TIMESTAMP NOT NULL DEFAULT NOW(),
+            report_date TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(), -- Cambiado a WITH TIME ZONE
             km_actual REAL NOT NULL,
             km_proximo_servicio REAL,
             fecha_servicio_anterior DATE,
@@ -327,14 +327,18 @@ def save_report_web(driver_id, header_data, checklist_results, observations, sig
     if not vehicle_plate or km_actual is None:
         raise ValueError("Faltan datos críticos: Placa o Kilometraje.")
         
+    # Definir la zona horaria de Guatemala
+    TIMEZONE_GUATEMALA = 'America/Guatemala'
+    
     try:
         # 1. INSERTAR REGISTRO PRINCIPAL EN REPORTS y obtener el ID
-        # NOTA: report_date se incluye explícitamente con NOW() para evitar errores de restricción NOT NULL
+        # Se utiliza (NOW() AT TIME ZONE 'UTC') AT TIME ZONE 'America/Guatemala' para 
+        # asegurar que la hora de guardado refleje la hora local de Guatemala.
         cur.execute("""
             INSERT INTO reports (
                 driver_id, vehicle_plate, km_actual, observations, header_data,
                 km_proximo_servicio, fecha_servicio_anterior, report_date
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, (NOW() AT TIME ZONE 'UTC') AT TIME ZONE %s)
             RETURNING id;
         """, (
             driver_id,
@@ -343,7 +347,8 @@ def save_report_web(driver_id, header_data, checklist_results, observations, sig
             observations,
             header_json,
             km_proximo_servicio,
-            fecha_servicio_anterior
+            fecha_servicio_anterior,
+            TIMEZONE_GUATEMALA # Usa el nuevo parámetro de zona horaria
         ))
         
         report_id = cur.fetchone()[0]
@@ -374,8 +379,8 @@ def save_report_web(driver_id, header_data, checklist_results, observations, sig
 def get_filtered_reports(start_date=None, end_date=None, pilot_id=None, plate=None):
     """Recupera reportes filtrados, usando pandas para la gestión de datos complejos."""
     if 'pd' not in globals():
-         raise ImportError("La librería pandas no está instalada, no se pueden usar reportes filtrados.")
-         
+        raise ImportError("La librería pandas no está instalada, no se pueden usar reportes filtrados.")
+        
     conn = get_db_connection()
     
     # Consulta principal: Une reports con users y subconsulta los detalles de la checklist.
