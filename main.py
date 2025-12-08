@@ -161,7 +161,7 @@ def admin_dashboard():
 @app.route('/admin/pilots', methods=['GET', 'POST'])
 @login_required
 @admin_required
-def manage_pilots_web():
+def admin_pilots(): # <-- Nombre de endpoint corregido/fijado a 'admin_pilots'
     # Manejar las acciones de POST (Añadir, Eliminar, Activar/Desactivar)
     if request.method == 'POST':
         action = request.form.get('action')
@@ -188,14 +188,13 @@ def manage_pilots_web():
             flash(f'Error de datos: {e}', 'danger')
         except Exception as e:
             flash(f'Error al gestionar piloto: {e}', 'danger')
-            return redirect(url_for('manage_pilots_web'))
+            return redirect(url_for('admin_pilots')) # Usar el endpoint 'admin_pilots'
 
     # Lógica GET
     pilots_list = db_manager.get_all_pilots()
     
-    # 🛑 ESTO ENTRA EN CONFLICTO CON TU HTML: 
-    # La plantilla busca 'users', pero aquí se envía 'pilots'.
-    return render_template('admin_pilots.html', pilots=pilots_list)
+    # Adaptación: Envía la lista como 'users' para que coincida con tu admin_pilots.html
+    return render_template('admin_pilots.html', users=pilots_list)
 
 
 @app.route('/admin/vehicles', methods=['GET', 'POST'])
@@ -253,7 +252,7 @@ def manage_vehicles_web():
 @app.route('/admin/reports', methods=['GET', 'POST'])
 @login_required
 @admin_required
-def manage_reports_web():
+def admin_reports(): # <-- Nombre de endpoint corregido/fijado a 'admin_reports'
     # Manejar eliminación de reportes
     if request.method == 'POST':
         action = request.form.get('action')
@@ -265,7 +264,7 @@ def manage_reports_web():
                 flash(f'Reporte #{report_id} eliminado exitosamente.', 'warning')
             except Exception as e:
                 flash(f'Error al eliminar el reporte: {e}', 'danger')
-            return redirect(url_for('manage_reports_web'))
+            return redirect(url_for('admin_reports')) 
 
     # Manejar filtros GET
     start_date = request.args.get('start_date')
@@ -286,8 +285,8 @@ def manage_reports_web():
 @login_required
 @admin_required
 def view_report_detail(report_id):
-    # Esto es solo un placeholder, la lógica real requeriría una función get_report_by_id
     try:
+        # Usar la función existente y filtrar
         all_reports = db_manager.get_filtered_reports() 
         report = next((r for r in all_reports if r['id'] == report_id), None)
         
@@ -298,11 +297,11 @@ def view_report_detail(report_id):
             return render_template('admin_report_detail.html', report=report)
         else:
             flash(f'Reporte con ID {report_id} no encontrado.', 'danger')
-            return redirect(url_for('manage_reports_web'))
+            return redirect(url_for('admin_reports')) 
 
     except Exception as e:
         flash(f'Error al cargar detalles del reporte: {e}', 'danger')
-        return redirect(url_for('manage_reports_web'))
+        return redirect(url_for('admin_reports')) 
 
 
 # --- Ejecución ---
