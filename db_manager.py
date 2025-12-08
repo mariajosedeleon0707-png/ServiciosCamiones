@@ -52,7 +52,7 @@ def inicializar_db():
             username TEXT UNIQUE NOT NULL,
             password_hash TEXT NOT NULL,
             full_name TEXT NOT NULL,
-            role TEXT NOT NULL DEFAULT 'p', -- Cambiado a 'p' por defecto
+            role TEXT NOT NULL DEFAULT 'piloto',
             is_active INTEGER NOT NULL DEFAULT 1
         );
     """)
@@ -171,10 +171,7 @@ def get_user_by_credentials(username, password):
     return None
 
 def get_all_pilots():
-    """
-    Obtiene la lista de pilotos, filtrando por el rol 'p' o 'piloto' 
-    para asegurar que solo los usuarios relevantes se muestren.
-    """
+    """Obtiene la lista de pilotos, excluyendo los administradores."""
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=RealDictCursor)
     
@@ -185,8 +182,8 @@ def get_all_pilots():
             v.plate AS assigned_vehicle_plate
         FROM users u
         LEFT JOIN vehicles v ON v.assigned_pilot_id = u.id
-        -- 🛑 FILTRO ESTRICTO: Solo 'p' o 'piloto' (Coincide con DB y plantilla) 🛑
-        WHERE LOWER(u.role) IN ('p', 'piloto') 
+        -- 🛑 FILTRO ORIGINAL PROBLEMÁTICO 🛑
+        WHERE LOWER(u.role) NOT IN ('admin', 'a')
         ORDER BY u.full_name;
     """)
     pilots = cur.fetchall()
@@ -209,8 +206,8 @@ def manage_user_web(action, **kwargs):
                 raise ValueError(f"El nombre de usuario '{username}' ya está en uso.")
                 
             password_hash = generate_password_hash(password)
-            # Por defecto, se añaden como 'p' (piloto)
-            cur.execute("INSERT INTO users (username, password_hash, full_name, role) VALUES (%s, %s, %s, 'p');",
+            # Por defecto, se añaden como 'piloto'
+            cur.execute("INSERT INTO users (username, password_hash, full_name, role) VALUES (%s, %s, %s, 'piloto');",
                         (username, password_hash, full_name))
             
         elif action == 'delete':
@@ -221,8 +218,7 @@ def manage_user_web(action, **kwargs):
         elif action == 'toggle_status':
             user_id = kwargs['user_id']
             status = kwargs['status']
-            
-            # Convierte los strings 'activate'/'deactivate' que usa tu plantilla a 1/0 para la DB
+            # Si el estado viene como string ('activate', 'deactivate') se mapea a 1 o 0
             if status == 'activate':
                 new_status = 1
             elif status == 'deactivate':
