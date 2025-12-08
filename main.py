@@ -107,7 +107,7 @@ def logout():
 def pilot_form():
     if session.get('role') != 'piloto':
         flash('Acceso denegado.', 'danger')
-        return redirect(url_for('dashboard'))
+        return redirect(url_for('dashboard')) # CORREGIDO: Usar 'dashboard'
 
     pilot_data = db_manager.load_pilot_data(session['user_id'])
 
@@ -257,7 +257,8 @@ def manage_vehicles_web():
                 )
                 flash('Vehículo añadido exitosamente.', 'success')
             elif action == 'assign':
-                pilot_id = request.form.get('pilot_id')
+                # El formulario de vehicles usa 'pilot_id', no 'assign_pilot_id'
+                pilot_id = request.form.get('pilot_id') 
                 db_manager.manage_vehicle(action, plate=plate, pilot_id=pilot_id)
                 flash(f'Vehículo asignado exitosamente.', 'success')
             elif action == 'delete':
@@ -383,7 +384,7 @@ def export_reports():
     output = io.StringIO()
     writer = csv.writer(output)
     
-    # Encabezados del CSV (Detalles_Checklist_JSON es la clave corregida)
+    # Encabezados del CSV (CORREGIDO: Detalles_Checklist_JSON es la clave correcta)
     writer.writerow([
         'ID_Reporte', 'Fecha_Reporte', 'Piloto', 'ID_Piloto', 'Placa_Vehiculo',
         'KM_Actual', 'Observaciones', 'Header_JSON', 'Detalles_Checklist_JSON'
