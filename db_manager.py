@@ -150,7 +150,7 @@ def inicializar_db():
             INSERT INTO users (username, password_hash, full_name, role)
             VALUES (%s, %s, %s, %s)
             ON CONFLICT (username) DO NOTHING;
-        """, ('admin', password_hash, 'Administrador Principal', 'admin'))
+        """, ('admin', password_hash, 'Administrador Principal', 'a'))
     
     conn.commit()
     conn.close()
@@ -171,18 +171,21 @@ def get_user_by_credentials(username, password):
     return None
 
 def get_all_pilots():
-    """Obtiene la lista de todos los pilotos con su vehículo asignado."""
+    """
+    Obtiene la lista de TODOS los usuarios, sin filtrar por rol. 
+    (Solución de emergencia para asegurar que aparezcan).
+    """
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=RealDictCursor)
     
     cur.execute("""
         SELECT
-            u.id, u.username, u.full_name, u.role, u.is_active,
+            u.id, u.username, u.full_name, LOWER(u.role) AS role, 
+            COALESCE(u.is_active, 1) AS is_active,
             v.plate AS assigned_vehicle_plate
         FROM users u
         LEFT JOIN vehicles v ON v.assigned_pilot_id = u.id
-        -- 🛑 CORRECCIÓN CLAVE: Usamos LOWER(u.role) para recuperar todos los pilotos, sin importar las mayúsculas.
-        WHERE LOWER(u.role) = 'piloto' 
+        -- 🛑 ¡FILTRO DE ROL ELIMINADO! 🛑
         ORDER BY u.full_name;
     """)
     pilots = cur.fetchall()
@@ -205,17 +208,26 @@ def manage_user_web(action, **kwargs):
                 raise ValueError(f"El nombre de usuario '{username}' ya está en uso.")
                 
             password_hash = generate_password_hash(password)
-            cur.execute("INSERT INTO users (username, password_hash, full_name) VALUES (%s, %s, %s);",
+            # Por defecto, se añaden como 'piloto'
+            cur.execute("INSERT INTO users (username, password_hash, full_name, role) VALUES (%s, %s, %s, 'p');",
                         (username, password_hash, full_name))
             
         elif action == 'delete':
             user_id = kwargs['user_id']
-            cur.execute("DELETE FROM users WHERE id = %s AND role = 'piloto';", (user_id,))
+            # Permite borrar solo si el rol no es admin (o 'a')
+            cur.execute("DELETE FROM users WHERE id = %s AND LOWER(role) NOT IN ('admin', 'a');", (user_id,))
             
         elif action == 'toggle_status':
             user_id = kwargs['user_id']
             status = kwargs['status']
-            new_status = 1 if int(status) == 0 else 0
+            # Si el estado viene como string ('activate', 'deactivate') se mapea a 1 o 0
+            if status == 'activate':
+                new_status = 1
+            elif status == 'deactivate':
+                new_status = 0
+            else: # Si viene como 0 o 1 (número)
+                new_status = 1 if int(status) == 0 else 0
+                
             cur.execute("UPDATE users SET is_active = %s WHERE id = %s;", (new_status, user_id))
             
         conn.commit()
