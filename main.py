@@ -1,464 +1,444 @@
-import os
-from datetime import datetime, timedelta 
-from flask import Flask, render_template, request, redirect, url_for, session, flash, jsonify, Response
-from functools import wraps
-from werkzeug.exceptions import HTTPException
-import pandas as pd
+import json
+import functools
+import io
 import csv
-from io import StringIO
+from flask import Flask, render_template, request, redirect, url_for, session, flash, make_response
+# Importaciones de módulos locales (config y db_manager)
+from config import SECRET_KEY, CHECKLIST_ITEMS
+import db_manager
 
-# Importar configuración y DB Manager
-import config
-import db_manager as db
-
-# --- Configuración de Flask ---
+# --- Inicialización de la Aplicación ---
 app = Flask(__name__)
-app.secret_key = config.SECRET_KEY
-app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=1) 
+app.secret_key = SECRET_KEY
 
-# Lista de estados válidos normalizados para la validación
-ESTADOS_VALIDOS_NORMALIZADOS = ["Buen Estado", "Mal Estado", "N/A"]
+# --- CONSTANTE DE ESTADOS VÁLIDOS ---
+ESTADOS_VALIDOS = ["Buen Estado", "Mal Estado", "N/A"]
+ESTADOS_VALIDOS_NORMALIZADOS = [s.lower().strip() for s in ESTADOS_VALIDOS]
+# ------------------------------------
 
-# --- Decoradores y Manejo de Sesión (CORREGIDO) ---
+# 🛠️ --- FILTROS PERSONALIZADOS DE JINJA ---
+def format_thousand_separator(value):
+    """
+    Filtro para añadir separador de miles (punto) en Jinja.
+    """
+    try:
+        # Convertir a entero y formatear con coma (separador por defecto en Python/US)
+        # Esto maneja los casos como '1000' -> '1,000'
+        formatted = f"{int(value):,}"
+        # Reemplazar la coma por un punto para el formato español/Latinoamericano
+        return formatted.replace(',', '.')
+    except (ValueError, TypeError):
+        return str(value)
+
+app.jinja_env.filters['separator'] = format_thousand_separator
+# 🛠️ --- FIN FILTROS PERSONALIZADOS DE JINJA ---
+
+# --- Decoradores ---
+
+def admin_required(f):
+    """Decorador para restringir el acceso solo a usuarios con rol 'admin'."""
+    @functools.wraps(f)
+    def decorated_function(*args, **kwargs):
+        if session.get('role') != 'admin':
+            flash('Acceso denegado. Se requiere ser administrador.', 'danger')
+            return redirect(url_for('home'))
+        return f(*args, **kwargs)
+    return decorated_function
 
 def login_required(f):
-    """Decorador para restringir el acceso a usuarios no logueados."""
-    @wraps(f)
-    # CORRECCIÓN CLAVE: decorated_function DEBE aceptar *args y **kwargs
-    def decorated_function(*args, **kwargs):
-        if 'user_id' not in session:
-            flash('Debes iniciar sesión para acceder a esta página.', 'warning')
-            return redirect(url_for('login'))
-        return f(*args, **kwargs)
-    # CORRECCIÓN CLAVE: El decorador retorna la función envuelta
-    return decorated_function
-    
-def role_required(role):
-    """Decorador para restringir el acceso por rol (solo 'admin')."""
-    def wrapper(f):
-        @wraps(f)
-        # CORRECCIÓN CLAVE: decorated_function DEBE aceptar *args y **kwargs
-        def decorated_function(*args, **kwargs):
-            if 'role' not in session or session['role'] != role:
-                flash('Acceso denegado: Se requiere rol de Administrador.', 'danger')
-                return redirect(url_for('dashboard'))
-            return f(*args, **kwargs)
-        # CORRECCIÓN CLAVE: El wrapper retorna la función envuelta
-        return decorated_function
-    return wrapper
+    """Decorador para restringir el acceso a usuarios no autenticados."""
+    @functools.wraps(f)
+    def decorated_function(*args, **kwargs):
+        if 'user_id' not in session:
+            flash('Por favor, inicie sesión para acceder.', 'warning')
+            return redirect(url_for('login'))
+        return f(*args, **kwargs)
+    return decorated_function
 
-# --- Rutas de Autenticación y Dashboard ---
+# --- Rutas de Autenticación y Home ---
+
+@app.route('/')
+def home():
+    if 'user_id' in session:
+        if session.get('role') == 'admin':
+            return render_template('admin_base.html')
+        elif session.get('role') == 'piloto':
+            return redirect(url_for('pilot_form'))
+    return redirect(url_for('login'))
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
-    """Maneja el inicio de sesión."""
-    if 'user_id' in session:
-        return redirect(url_for('dashboard'))
+    if request.method == 'POST':
+        username = request.form['username']
+        password = request.form['password']
 
-    if request.method == 'POST':
-        username = request.form.get('username')
-        password = request.form.get('password')
-        
-        user = db.get_user_by_credentials(username, password)
-        
-        if user and user['is_active']:
-            session.permanent = True
-            session['user_id'] = user['id']
-            session['username'] = user['username']
-            session['full_name'] = user['full_name']
-            session['role'] = user['role']
-            flash(f'¡Bienvenido, {user["full_name"]}!', 'success')
-            return redirect(url_for('dashboard'))
-        else:
-            flash('Credenciales incorrectas o usuario inactivo.', 'danger')
-            
-    return render_template('login.html')
+        user = db_manager.get_user_by_credentials(username, password)
+
+        if user and user.get('is_active') == 1:
+            session['user_id'] = user['id']
+            session['user_name'] = user['full_name']
+            session['role'] = user['role']
+            flash(f"Bienvenido, {user['full_name']}!", 'success')
+            return redirect(url_for('home'))
+        elif user and user.get('is_active') == 0:
+            flash("Su cuenta ha sido deshabilitada. Contacte al administrador.", 'danger')
+        else:
+            flash('Usuario o contraseña incorrectos.', 'danger')
+
+    return render_template('login.html')
 
 @app.route('/logout')
 def logout():
-    """Cierra la sesión del usuario."""
-    session.clear()
-    flash('Sesión cerrada exitosamente.', 'info')
-    return redirect(url_for('login'))
+    session.clear()
+    flash('Sesión cerrada correctamente.', 'info')
+    return redirect(url_for('login'))
 
-@app.route('/')
-@login_required
-def dashboard():
-    """Ruta principal (endpoint 'dashboard'). CORRIGE el error 'home' en templates."""
-    if session.get('role') == 'admin':
-        return redirect(url_for('admin_dashboard'))
-    elif session.get('role') == 'piloto':
-        return redirect(url_for('pilot_form'))
-    return redirect(url_for('logout'))
+# --- Rutas de Piloto ---
 
-# --- Lógica de Pilotos (Formulario de Inspección) ---
-
-def normalize_item_name(item_name):
-    """Normaliza el nombre del ítem para crear la clave consistente para la BD."""
-    return item_name.replace(' ', '_').replace('/', '_').replace('(', '').replace(')', '').replace(',', '').replace('-', '').replace('.', '')
-
-def validate_and_parse_checklist(form_data):
-    """Valida que todos los ítems de la checklist hayan sido marcados y los estructura."""
-    checklist_results = {}
-    
-    item_map = {}
-    all_expected_keys = []
-    for category, items in config.CHECKLIST_ITEMS:
-        for item in items:
-            normalized_name = normalize_item_name(item)
-            item_map[normalized_name] = (item, category)
-            all_expected_keys.extend([f'check_{normalized_name}'])
-            
-    for expected_key in all_expected_keys:
-        state = form_data.get(expected_key)
-        
-        if not state:
-            raise ValueError(f"Falta el estado de un ítem requerido: {expected_key}")
-        
-        if state not in ESTADOS_VALIDOS_NORMALIZADOS:
-            raise ValueError(f"Estado inválido para {expected_key}: {state}")
-
-        normalized_name = expected_key.replace('check_', '')
-        full_item_name, category = item_map.get(normalized_name)
-        
-        checklist_results[full_item_name] = {
-            'categoria': category,
-            'estado': state
-        }
-        
-    return checklist_results
-
-@app.route('/pilot_form', methods=['GET', 'POST'])
+@app.route('/pilot/form', methods=['GET', 'POST'])
 @login_required
 def pilot_form():
-    """Muestra el formulario de inspección y maneja su envío."""
-    driver_id = session.get('user_id')
-    
-    try:
-        pilot_data = db.load_pilot_data(driver_id)
-    except Exception as e:
-        flash(f"Error al cargar datos de piloto/vehículo: {e}", 'danger')
-        pilot_data = None
-        
-    if not pilot_data or not pilot_data.get('plate'):
-        flash('No tienes un vehículo asignado. No puedes realizar la inspección.', 'warning')
-        return render_template('pilot_form.html', pilot_data=None, error="No hay vehículo asignado.")
+    if session.get('role') != 'piloto':
+        flash('Acceso denegado.', 'danger')
+        return redirect(url_for('home'))
 
-    if request.method == 'POST':
-        try:
-            checklist_results = validate_and_parse_checklist(request.form)
-            
-            header_data = {
-                'plate': pilot_data['plate'],
-                'km_actual': float(request.form['km_actual']),
-                'km_proximo_servicio': float(request.form.get('km_proximo_servicio')) if request.form.get('km_proximo_servicio') else None,
-                'fecha_servicio_anterior': request.form.get('fecha_servicio_anterior') if request.form.get('fecha_servicio_anterior') else None,
-                'promo_marca': request.form['promo_marca'],
-                'fecha_inicio': request.form['fecha_inicio'],
-                'fecha_finalizacion': request.form['fecha_finalizacion'],
-                'tipo_licencia': request.form['tipo_licencia'],
-                'vencimiento_licencia': request.form['vencimiento_licencia'],
-                'tarjeta_seguro': request.form['tarjeta_seguro'],
-            }
-            
-            observations = request.form.get('observations')
-            signature_confirmation = request.form.get('signature_confirmation')
-            
-            db.save_report_web(
-                driver_id=driver_id,
-                header_data=header_data,
-                checklist_results=checklist_results,
-                observations=observations,
-                signature_confirmation=signature_confirmation
-            )
-            
-            flash('✅ Reporte de Inspección guardado con éxito.', 'success')
-            return redirect(url_for('pilot_form'))
-            
-        except ValueError as e:
-            flash(f'Error de validación: {e}', 'danger')
-        except Exception as e:
-            flash(f'Error al guardar el reporte: {e}', 'danger')
+    pilot_data = db_manager.load_pilot_data(session['user_id'])
 
-    return render_template('pilot_form.html', pilot_data=pilot_data, checklist=config.CHECKLIST_ITEMS)
+    if not pilot_data or not pilot_data.get('plate'):
+        return render_template('pilot_form.html', error="No tiene un vehículo asignado. Contacte a su administrador.", pilot_data=None)
 
-# --- Rutas de Administrador ---
+    if request.method == 'POST':
+        try:
+            # 1. VALIDACIÓN Y RECOLECCIÓN DE DATOS GENERALES
 
-@app.route('/admin')
-@login_required
-@role_required('admin')
-def admin_dashboard():
-    """Panel principal de administración. Usa admin_base.html como dashboard (ajustado a tu estructura)."""
-    return render_template('admin_base.html') 
+            # --- KM Actual (Validación Numérica y de Vacío) ---
+            km_actual_str = request.form.get('km_actual')
+            if not km_actual_str:
+                raise ValueError("El campo Kilometraje Actual es obligatorio.")
+            try:
+                # Convertir a float
+                km_actual = float(km_actual_str)
+            except ValueError:
+                raise ValueError("El Kilometraje Actual debe ser un número válido.")
+            # ----------------------------------------------------
 
-# --- Gestión de Usuarios ---
+            observations = request.form.get('observations', '')
 
-@app.route('/admin/users', methods=['GET', 'POST'])
-@login_required
-@role_required('admin')
-def manage_users():
-    """Gestión de pilotos. Usa admin_pilots.html (ajustado a tu estructura)."""
-    if request.method == 'POST':
-        action = request.form.get('action')
-        user_id = request.form.get('user_id')
-        
-        try:
-            if action == 'add':
-                db.manage_user_web(
-                    action='add',
-                    username=request.form['username'],
-                    full_name=request.form['full_name'],
-                    password=request.form['password']
-                )
-                flash('Piloto agregado exitosamente.', 'success')
-            
-            elif action == 'delete' and user_id:
-                db.manage_user_web(action='delete', user_id=int(user_id))
-                flash('Piloto eliminado exitosamente.', 'success')
-                
-            elif action == 'toggle_status' and user_id:
-                status = request.form.get('current_status')
-                db.manage_user_web(action='toggle_status', user_id=int(user_id), status=status)
-                flash('Estado del piloto actualizado.', 'success')
-                
-            else:
-                flash('Acción o parámetros inválidos.', 'warning')
-                
-        except ValueError as e:
-            flash(f'Error: {e}', 'danger')
-        except Exception as e:
-            flash(f'Error al procesar la solicitud: {e}', 'danger')
-            
-        return redirect(url_for('manage_users'))
+            # --- Firma (Validación de Obligatoriedad) ---
+            signature_confirmation = request.form.get('signature_confirmation')
+            if signature_confirmation is None: # Si el checkbox no fue marcado, es None
+                raise ValueError("Debe confirmar con la firma (checkbox) para enviar el reporte.")
+            # ------------------------------------------
 
-    pilots = db.get_all_pilots()
-    return render_template('admin_pilots.html', pilots=pilots)
+            # Recoger los demás campos
+            promo_marca = request.form.get('promo_marca', '')
+            fecha_inicio = request.form.get('fecha_inicio', '')
+            fecha_finalizacion = request.form.get('fecha_finalizacion', '')
+            tipo_licencia = request.form.get('tipo_licencia', '')
+            vencimiento_licencia = request.form.get('vencimiento_licencia', '')
+            tarjeta_seguro = request.form.get('tarjeta_seguro', '')
+            km_proximo_servicio = request.form.get('km_proximo_servicio', '')
+            fecha_servicio_anterior = request.form.get('fecha_servicio_anterior', '')
 
-# --- Gestión de Vehículos ---
+
+            # 2. Recoger datos del encabezado (Header Data)
+            report_data = {
+                'plate': pilot_data['plate'],
+                'brand': pilot_data['brand'],
+                'model': pilot_data['model'],
+                'km_actual': km_actual,
+                # Se incluyen los nuevos datos
+                'promo_marca': promo_marca,
+                'fecha_inicio': fecha_inicio,
+                'fecha_finalizacion': fecha_finalizacion,
+                'tipo_licencia': tipo_licencia,
+                'vencimiento_licencia': vencimiento_licencia,
+                'tarjeta_seguro': tarjeta_seguro,
+                'km_proximo_servicio': km_proximo_servicio,
+                'fecha_servicio_anterior': fecha_servicio_anterior,
+            }
+
+            # 3. Recoger resultados del checklist y APLICAR VALIDACIÓN ESTRICTA
+            checklist_results = {}
+            for category, items in CHECKLIST_ITEMS:
+                for item in items:
+                    # Construcción de la clave de formulario limpia
+                    form_key = 'check_' + item.replace(' ', '_').replace('/', '_').replace('(', '').replace(')', '').replace(',', '').replace('-', '').replace('.', '')
+
+                    # Si la clave NO está en request.form, significa que no se marcó NINGÚN radio button
+                    if form_key in request.form:
+                        estado_value = request.form[form_key]
+
+                        # 🌟 CORRECCIÓN CLAVE: Normalizar el valor recibido para la validación
+                        estado_normalizado = estado_value.lower().strip()
+
+                        if estado_normalizado not in ESTADOS_VALIDOS_NORMALIZADOS:
+                            raise ValueError(f"ERROR DE CALIFICACIÓN: El ítem '{item}' debe ser calificado como 'Buen Estado', 'Mal Estado' o 'N/A'.")
+
+                        # ✅ CORRECCIÓN 1: Adaptar el formato para db_manager.save_report_web
+                        # El db_manager espera un diccionario con 'categoria' y 'estado'
+                        checklist_results[item] = {
+                            'categoria': category,
+                            'estado': estado_value # Valor original ('Buen Estado', 'Mal Estado', 'N/A')
+                        }
+                    else:
+                        # Esto atrapa el caso en que un ítem obligatorio no fue seleccionado
+                        raise ValueError(f"Falta seleccionar el estado para el ítem obligatorio: {item}")
+
+
+            # 4. Guardar en la DB
+            db_manager.save_report_web(
+                session['user_id'],
+                report_data,
+                checklist_results,
+                observations,
+                signature_confirmation
+            )
+
+            flash('Reporte de inspección guardado exitosamente.', 'success')
+            return redirect(url_for('pilot_form'))
+
+        except ValueError as e:
+            flash(f'Error de validación: {e}', 'danger')
+        except Exception as e:
+            # Errores críticos de DB, ej. Violación de Foreign Key, problemas de conexión
+            flash(f'Error al guardar el reporte: {e}', 'danger')
+
+    return render_template('pilot_form.html', pilot_data=pilot_data, checklist=CHECKLIST_ITEMS)
+
+# --- Rutas de Administración (Usuarios y Vehículos) ---
+
+@app.route('/admin/pilots', methods=['GET', 'POST'])
+@admin_required
+def manage_pilots_web():
+    if request.method == 'POST':
+        action = request.form.get('action')
+        user_id = request.form.get('user_id')
+
+        try:
+            if action == 'add':
+                db_manager.manage_user_web(
+                    action,
+                    full_name=request.form['full_name'],
+                    username=request.form['username'],
+                    password=request.form['password']
+                )
+                flash('Piloto añadido exitosamente.', 'success')
+            elif action in ['delete', 'toggle_status']:
+                status = request.form.get('status')
+                db_manager.manage_user_web(action, user_id=user_id, status=status)
+                flash(f'Piloto {action} exitosamente.', 'success')
+
+        except ValueError as e:
+            flash(f"Error: {e}", 'danger')
+        except Exception as e:
+            flash(f"Error inesperado: {e}", 'danger')
+
+    users = db_manager.get_all_pilots()
+    return render_template('admin_pilots.html', users=users)
+
 
 @app.route('/admin/vehicles', methods=['GET', 'POST'])
-@login_required
-@role_required('admin')
-def manage_vehicles():
-    """Gestión y asignación de vehículos. Usa admin_vehicles.html (ajustado a tu estructura)."""
-    if request.method == 'POST':
-        action = request.form.get('action')
-        plate = request.form.get('plate')
-        
-        try:
-            if action == 'add' or action == 'update':
-                kwargs = {
-                    'plate': request.form['plate'],
-                    'brand': request.form['brand'],
-                    'model': request.form['model'],
-                    'year': request.form['year'],
-                    'capacity_kg': request.form['capacity_kg']
-                }
-                db.manage_vehicle(action=action, **kwargs)
-                flash(f'Vehículo {action}izado exitosamente.', 'success')
-            
-            elif action == 'delete' and plate:
-                db.manage_vehicle(action='delete', plate=plate)
-                flash('Vehículo eliminado exitosamente.', 'success')
-            
-            elif action == 'assign' and plate:
-                pilot_id = request.form.get('assign_pilot_id')
-                if not pilot_id or pilot_id == 'none':
-                     db.manage_vehicle(action='unassign', plate=plate)
-                     flash('Vehículo desasignado exitosamente.', 'success')
-                else:
-                    db.manage_vehicle(action='assign', plate=plate, assign_pilot_id=int(pilot_id))
-                    flash('Vehículo asignado exitosamente.', 'success')
+@admin_required
+def manage_vehicles_web():
+    if request.method == 'POST':
+        action = request.form.get('action')
+        plate = request.form.get('plate')
 
-            else:
-                flash('Acción o parámetros inválidos.', 'warning')
-                
-        except Exception as e:
-            flash(f'Error al procesar la solicitud: {e}', 'danger')
-            
-        return redirect(url_for('manage_vehicles'))
+        try:
+            if action == 'add':
+                db_manager.manage_vehicle(
+                    action,
+                    plate=plate,
+                    brand=request.form['brand'],
+                    model=request.form['model'],
+                    year=request.form['year'],
+                    capacity_kg=request.form['capacity_kg']
+                )
+                flash('Vehículo añadido exitosamente.', 'success')
+            elif action == 'update':
+                db_manager.manage_vehicle(
+                    action,
+                    plate=plate,
+                    brand=request.form['brand'],
+                    model=request.form['model'],
+                    year=request.form['year'],
+                    capacity_kg=request.form['capacity_kg']
+                )
+                flash('Vehículo actualizado exitosamente.', 'success')
+            elif action == 'assign':
+                db_manager.manage_vehicle(
+                    action,
+                    plate=plate,
+                    assign_pilot_id=request.form['pilot_id']
+                )
+                flash('Piloto asignado exitosamente.', 'success')
+            elif action == 'unassign':
+                db_manager.manage_vehicle(action, plate=plate)
+                flash('Piloto desasignado exitosamente.', 'success')
+            elif action == 'delete':
+                db_manager.manage_vehicle(action, plate=plate)
+                flash('Vehículo eliminado exitosamente.', 'success')
 
-    vehicles = db.get_all_vehicles()
-    pilots = db.get_all_pilots()
-    return render_template('admin_vehicles.html', vehicles=vehicles, pilots=pilots)
+        except ValueError as e:
+            flash(f"Error: {e}", 'danger')
+        except Exception as e:
+            flash(f"Error inesperado: {e}", 'danger')
 
-# --- Rutas de Reportes ---
+    vehicles = db_manager.get_all_vehicles()
+    pilots = db_manager.get_all_pilots()
+    return render_template('admin_vehicles.html', vehicles=vehicles, pilots=pilots)
+
+
+# --- Rutas de Reportes (Seguridad y Conversión de Fecha Corregida) ---
 
 @app.route('/admin/reports', methods=['GET'])
 @login_required
-@role_required('admin')
-def view_reports():
-    """Muestra la lista de reportes de inspección con filtros. Usa admin_reports.html."""
-    start_date = request.args.get('start_date')
-    end_date = request.args.get('end_date')
-    pilot_id = request.args.get('pilot_id')
-    plate = request.args.get('plate')
-    
-    try:
-        reports = db.get_filtered_reports(start_date, end_date, pilot_id, plate)
-        
-        for report in reports:
-            if report.get('report_date'):
-                if isinstance(report['report_date'], datetime):
-                    report['report_date_str'] = report['report_date'].strftime('%Y-%m-%d %H:%M:%S')
-                else:
-                    try:
-                        report_dt = datetime.fromisoformat(str(report['report_date']))
-                        report['report_date_str'] = report_dt.strftime('%Y-%m-%d %H:%M:%S')
-                    except Exception:
-                        report['report_date_str'] = str(report['report_date'])
+def admin_reports():
+    # 1. Obtener filtros y definir seguridad
+    start_date = request.args.get('start_date')
+    end_date = request.args.get('end_date')
+    pilot_id_str = request.args.get('pilot_id')
+    plate = request.args.get('plate')
 
-    except ImportError:
-        reports = []
-        flash('Error: La librería Pandas no está instalada, no se pueden ver los reportes.', 'danger')
-    except Exception as e:
-        reports = []
-        flash(f'Error al cargar los reportes: {e}', 'danger')
+    is_admin = session.get('role') == 'admin'
+    pilot_id = int(pilot_id_str) if pilot_id_str and pilot_id_str.isdigit() else None
+    pilots = []
 
-    all_pilots = db.get_all_pilots()
-    all_vehicles = db.get_all_vehicles()
-    
-    return render_template('admin_reports.html', 
-                           reports=reports, 
-                           pilots=all_pilots, 
-                           vehicles=all_vehicles,
-                           current_filters={
-                               'start_date': start_date,
-                               'end_date': end_date,
-                               'pilot_id': pilot_id,
-                               'plate': plate
-                           })
+    if not is_admin:
+        # Si no es admin, solo puede ver sus propios reportes
+        pilot_id = session['user_id']
+        pilot_id_str = str(session['user_id'])
+    else:
+        # Si es admin, puede ver todos o cargar la lista de pilotos para el filtro
+        try:
+            pilots = db_manager.get_all_pilots()
+        except Exception:
+            pilots = []
+
+    filters = {
+        'start_date': start_date if start_date else '',
+        'end_date': end_date if end_date else '',
+        'pilot_id': pilot_id_str if pilot_id_str else '',
+        'plate': plate if plate else 
+    }
+
+    # 3. Obtener datos filtrados y PROCESAR FECHAS
+    try:
+        reports = db_manager.get_filtered_reports(start_date, end_date, pilot_id, plate)
+
+        # === CONVERSIÓN DE TIMESTAMP A STRING PARA JINJA (Resuelve el UndefinedError) ===
+        reports_processed = []
+        for report in reports:
+            # Si report_date es un objeto Timestamp, lo convertimos a string
+            if hasattr(report['report_date'], 'strftime'):
+                report['report_date'] = report['report_date'].strftime('%Y-%m-%d %H:%M:%S')
+
+            reports_processed.append(report)
+
+    except Exception as e:
+        flash(f"Error al cargar datos: {e}", 'danger')
+        reports_processed = []
+
+    # 4. Serializar reportes para el JavaScript (reports_json)
+    reports_json = json.dumps(reports_processed, default=str)
+
+    # 5. Renderizar la plantilla
+    return render_template('admin_reports.html',
+                            reports=reports_processed,
+                            pilots=pilots,
+                            filters=filters,
+                            reports_json=reports_json)
+
 
 @app.route('/admin/reports/delete/<int:report_id>', methods=['POST'])
+@admin_required
+def delete_report_web(report_id):
+    """
+    Ruta para eliminar un reporte específico por su ID.
+    """
+    try:
+        db_manager.delete_report(report_id)
+        flash(f'Reporte ID {report_id} eliminado exitosamente.', 'success')
+    except Exception as e:
+        flash(f'Error al eliminar el reporte: {e}', 'danger')
+
+    return redirect(url_for('admin_reports'))
+
+
+@app.route('/admin/reports/export', methods=['GET'])
 @login_required
-@role_required('admin')
-def delete_report(report_id):
-    """Elimina un reporte específico."""
-    try:
-        db.delete_report(report_id)
-        flash(f'Reporte ID {report_id} eliminado exitosamente.', 'success')
-    except ValueError as e:
-        flash(str(e), 'danger')
-    except Exception as e:
-        flash(f'Error al eliminar el reporte: {e}', 'danger')
-    
-    return redirect(url_for('view_reports'))
+def export_reports():
+    """Exporta los reportes filtrados a un archivo CSV."""
 
+    # 1. Obtener filtros y seguridad (igual que admin_reports)
+    start_date = request.args.get('start_date')
+    end_date = request.args.get('end_date')
+    pilot_id_str = request.args.get('pilot_id')
+    plate = request.args.get('plate')
 
-@app.route('/admin/reports/export_csv', methods=['GET'])
-@login_required
-@role_required('admin')
-def export_csv():
-    """Genera y descarga un CSV con los reportes filtrados."""
-    start_date = request.args.get('start_date')
-    end_date = request.args.get('end_date')
-    pilot_id = request.args.get('pilot_id')
-    plate = request.args.get('plate')
-    
-    try:
-        reports = db.get_filtered_reports(start_date, end_date, pilot_id, plate)
-        
-        if not reports:
-            flash('No hay datos para exportar con los filtros seleccionados.', 'info')
-            return redirect(url_for('view_reports', **request.args))
-            
-        static_headers = [
-            'ID Reporte', 'Fecha Reporte (Guatemala)', 'Piloto', 'Placa', 
-            'KM Actual', 'KM Próximo Servicio', 'Fecha Servicio Anterior', 
-            'Marca Promoción', 'Fecha Inicio Promoción', 'Fecha Fin Promoción',
-            'Tipo Licencia', 'Vencimiento Licencia', 'Tarjeta Seguro', 'Observaciones'
-        ]
-        
-        checklist_headers = []
-        for _, items in config.CHECKLIST_ITEMS:
-            checklist_headers.extend(items)
-        
-        all_headers = static_headers + checklist_headers
-        
-        def generate():
-            csv_buffer = StringIO()
-            writer = csv.DictWriter(csv_buffer, fieldnames=all_headers)
-            writer.writeheader()
+    is_admin = session.get('role') == 'admin'
+    pilot_id = int(pilot_id_str) if pilot_id_str and pilot_id_str.isdigit() else None
 
-            for report in reports:
-                row = {}
-                row['ID Reporte'] = report.get('id', '')
-                
-                report_date = report.get('report_date')
-                if isinstance(report_date, datetime):
-                    row['Fecha Reporte (Guatemala)'] = report_date.strftime('%Y-%m-%d %H:%M:%S')
-                else:
-                    row['Fecha Reporte (Guatemala)'] = str(report_date or '')
+    if not is_admin:
+        pilot_id = session['user_id']
 
-                row['Piloto'] = report.get('pilot_name', '')
-                row['Placa'] = report.get('vehicle_plate', '')
-                row['KM Actual'] = report.get('km_actual', '')
-                row['KM Próximo Servicio'] = report.get('km_proximo_servicio', '')
-                
-                fecha_servicio_anterior = report.get('fecha_servicio_anterior')
-                if isinstance(fecha_servicio_anterior, datetime):
-                    row['Fecha Servicio Anterior'] = fecha_servicio_anterior.strftime('%Y-%m-%d')
-                else:
-                    row['Fecha Servicio Anterior'] = str(fecha_servicio_anterior or '')
-                
-                row['Observaciones'] = report.get('observations', '')
-                
-                header_data = report.get('header_data', {})
-                row['Marca Promoción'] = header_data.get('promo_marca', '')
-                row['Fecha Inicio Promoción'] = header_data.get('fecha_inicio', '')
-                row['Fecha Fin Promoción'] = header_data.get('fecha_finalizacion', '')
-                row['Tipo Licencia'] = header_data.get('tipo_licencia', '')
-                row['Vencimiento Licencia'] = header_data.get('vencimiento_licencia', '')
-                row['Tarjeta Seguro'] = header_data.get('tarjeta_seguro', '')
-                
-                checklist_map = {item['item']: item['estado'] for item in report.get('checklist_details', [])}
-                
-                for item_name in checklist_headers:
-                    row[item_name] = checklist_map.get(item_name, 'No Registrado')
-                    
-                writer.writerow(row)
-                
-                yield csv_buffer.getvalue()
-                csv_buffer.seek(0)
-                csv_buffer.truncate(0)
+    # 2. Obtener datos filtrados y PROCESAR FECHAS
+    try:
+        reports = db_manager.get_filtered_reports(start_date, end_date, pilot_id, plate)
 
-            
-        now = datetime.now().strftime('%Y%m%d_%H%M%S')
-        filename = f"reporte_inspeccion_{now}.csv"
-        
-        response = Response(generate(), mimetype='text/csv')
-        response.headers['Content-Disposition'] = f'attachment; filename={filename}'
-        return response
+        # === CONVERSIÓN DE TIMESTAMP A STRING para el CSV y JSON ===
+        for report in reports:
+            if hasattr(report['report_date'], 'strftime'):
+                report['report_date'] = report['report_date'].strftime('%Y-%m-%d %H:%M:%S')
+        # ===========================================================
 
-    except Exception as e:
-        flash(f'Error al generar el archivo CSV: {e}', 'danger')
-        return redirect(url_for('view_reports'))
+    except Exception as e:
+        flash(f"Error al exportar datos: {e}", 'danger')
+        return redirect(url_for('admin_reports'))
 
-# --- Manejo de errores ---
+    # 3. Preparar la respuesta CSV
+    output = io.StringIO()
+    writer = csv.writer(output)
 
-@app.errorhandler(404)
-def page_not_found(e):
-    # CORREGIDO: Llama a 404.html
-    return render_template('404.html'), 404
+    # Encabezados del CSV
+    # ✅ CORRECCIÓN 2: Cambiado 'Checklist_JSON' por 'Detalles_Checklist_JSON'
+    writer.writerow([
+        'ID_Reporte', 'Fecha_Reporte', 'Piloto', 'ID_Piloto', 'Placa_Vehiculo',
+        'KM_Actual', 'Observaciones', 'Header_JSON', 'Detalles_Checklist_JSON'
+    ])
 
-@app.errorhandler(Exception)
-def handle_exception(e):
-    if isinstance(e, HTTPException):
-        return e
-    
-    app.logger.error(f"Error inesperado: {e}")
-    # CORREGIDO: Llama a 500.html
-    return render_template('500.html', error=str(e)), 500
+    # 4. Datos
+    for report in reports:
+        # report['report_date'] ahora es un string limpio
+        # ✅ CORRECCIÓN 2: Cambiado report['checklist_data'] por report['checklist_details']
+        row = [
+            report['id'],
+            report['report_date'],
+            report['pilot_name'],
+            report['driver_id'],
+            report['vehicle_plate'],
+            report['km_actual'],
+            report['observations'],
+            json.dumps(report['header_data'], default=str),
+            json.dumps(report['checklist_details'], default=str)
+        ]
+        writer.writerow(row)
 
-# --- Inicialización y Ejecución ---
+    # 5. Crear el objeto Response para la descarga
+    response = make_response(output.getvalue())
+    response.headers['Content-Type'] = 'text/csv'
+    response.headers['Content-Disposition'] = 'attachment; filename=reportes_inspeccion.csv'
+    return response
+
+# --- Ejecución de la App (Inicialización de la DB) ---
+
+try:
+    db_manager.inicializar_db()
+except Exception as e:
+    # Esto evita que la aplicación se caiga si falla la conexión a la DB,
+    # pero permite que las rutas arrojen el error apropiado.
+    print(f"ERROR CRÍTICO DE CONEXIÓN EN INICIALIZACIÓN: {e}")
 
 if __name__ == '__main__':
-    try:
-        db.inicializar_db()
-        print("Base de datos inicializada/verificada.")
-    except ConnectionError as e:
-        print(f"Error CRÍTICO al conectar/inicializar la DB: {e}")
-    except Exception as e:
-        print(f"Error desconocido durante la inicialización de la DB: {e}")
-        
-    app.run(debug=True)
+    app.run(debug=True)
