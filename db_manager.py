@@ -1,3 +1,5 @@
+# db_manager.py
+
 import os
 import datetime
 import json
@@ -19,7 +21,7 @@ except ImportError:
     pass
 
 DATABASE_URL = os.environ.get('DATABASE_URL')
-POSTGRES_ACTIVE = True
+POSTGRES_ACTIVE = True 
 
 # --- Funciones de Conexión ---
 
@@ -28,11 +30,11 @@ def get_db_connection():
     if not POSTGRES_ACTIVE:
         raise Exception("El módulo psycopg2 no está disponible.")
     
-    if not DATABASE_URL:
+    if not DATABASE_URL: 
         raise ConnectionError("Falta la variable de entorno esencial DATABASE_URL. Revise su configuración.")
 
     try:
-        conn = psycopg2.connect(DATABASE_URL)
+        conn = psycopg2.connect(DATABASE_URL) 
         return conn
     except psycopg2.OperationalError as e:
         print(f"Error de conexión a PostgreSQL. Revise la variable DATABASE_URL: {e}")
@@ -100,7 +102,7 @@ def inicializar_db():
 
     # 🌟 BLOQUE DE MIGRACIONES Y CORRECCIÓN DE ESQUEMA 🌟
     
-    # 4.1. MIGRACIÓN: Añadir km_proximo_servicio
+    # 4.1. MIGRACIÓN: Añadir km_proximo_servicio (solución a "column does not exist")
     try:
         cur.execute("SELECT km_proximo_servicio FROM reports LIMIT 0;")
     except psycopg2.ProgrammingError:
@@ -108,7 +110,7 @@ def inicializar_db():
         cur.execute("ALTER TABLE reports ADD COLUMN km_proximo_servicio REAL;")
         print("MIGRACIÓN: Columna 'km_proximo_servicio' añadida a 'reports'.")
     
-    # 4.2. MIGRACIÓN: Añadir fecha_servicio_anterior
+    # 4.2. MIGRACIÓN: Añadir fecha_servicio_anterior (solución a "column does not exist")
     try:
         cur.execute("SELECT fecha_servicio_anterior FROM reports LIMIT 0;")
     except psycopg2.ProgrammingError:
@@ -116,15 +118,15 @@ def inicializar_db():
         cur.execute("ALTER TABLE reports ADD COLUMN fecha_servicio_anterior DATE;")
         print("MIGRACIÓN: Columna 'fecha_servicio_anterior' añadida a 'reports'.")
 
-    # 4.3. MIGRACIÓN CRÍTICA: Eliminar columna obsoleta checklist_data 
+    # 4.3. MIGRACIÓN CRÍTICA: Eliminar columna obsoleta checklist_data (solución a "violates not-null constraint")
     try:
         cur.execute("SELECT checklist_data FROM reports LIMIT 0;")
-        conn.rollback()
+        conn.rollback() 
         cur.execute("ALTER TABLE reports DROP COLUMN checklist_data;")
         print("MIGRACIÓN: Columna obsoleta 'checklist_data' eliminada de 'reports'.")
     except psycopg2.ProgrammingError:
         conn.rollback()
-        pass
+        pass 
     # ----------------------------------------------------------------------
     
     # 5. TABLA DE DETALLES DE LA CHECKLIST (Relacional 1:N con reports)
@@ -150,7 +152,7 @@ def inicializar_db():
             INSERT INTO users (username, password_hash, full_name, role)
             VALUES (%s, %s, %s, %s)
             ON CONFLICT (username) DO NOTHING;
-        """, ('admin', password_hash, 'Administrador Principal', 'a'))
+        """, ('admin', password_hash, 'Administrador Principal', 'admin'))
     
     conn.commit()
     conn.close()
@@ -171,19 +173,17 @@ def get_user_by_credentials(username, password):
     return None
 
 def get_all_pilots():
-    """Obtiene la lista de pilotos, excluyendo los administradores."""
+    """Obtiene la lista de todos los pilotos con su vehículo asignado."""
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=RealDictCursor)
     
     cur.execute("""
-        SELECT
-            u.id, u.username, u.full_name, LOWER(u.role) AS role, 
-            COALESCE(u.is_active, 1) AS is_active,
+        SELECT 
+            u.id, u.username, u.full_name, u.role, u.is_active,
             v.plate AS assigned_vehicle_plate
         FROM users u
         LEFT JOIN vehicles v ON v.assigned_pilot_id = u.id
-        -- 🛑 FILTRO ORIGINAL PROBLEMÁTICO 🛑
-        WHERE LOWER(u.role) NOT IN ('admin', 'a')
+        WHERE u.role = 'piloto'
         ORDER BY u.full_name;
     """)
     pilots = cur.fetchall()
@@ -206,26 +206,17 @@ def manage_user_web(action, **kwargs):
                 raise ValueError(f"El nombre de usuario '{username}' ya está en uso.")
                 
             password_hash = generate_password_hash(password)
-            # Por defecto, se añaden como 'piloto'
-            cur.execute("INSERT INTO users (username, password_hash, full_name, role) VALUES (%s, %s, %s, 'piloto');",
+            cur.execute("INSERT INTO users (username, password_hash, full_name) VALUES (%s, %s, %s);", 
                         (username, password_hash, full_name))
             
         elif action == 'delete':
             user_id = kwargs['user_id']
-            # Permite borrar solo si el rol no es admin (o 'a')
-            cur.execute("DELETE FROM users WHERE id = %s AND LOWER(role) NOT IN ('admin', 'a');", (user_id,))
+            cur.execute("DELETE FROM users WHERE id = %s AND role = 'piloto';", (user_id,))
             
         elif action == 'toggle_status':
             user_id = kwargs['user_id']
             status = kwargs['status']
-            # Si el estado viene como string ('activate', 'deactivate') se mapea a 1 o 0
-            if status == 'activate':
-                new_status = 1
-            elif status == 'deactivate':
-                new_status = 0
-            else: # Si viene como 0 o 1 (número)
-                new_status = 1 if int(status) == 0 else 0
-                
+            new_status = 1 if int(status) == 0 else 0
             cur.execute("UPDATE users SET is_active = %s WHERE id = %s;", (new_status, user_id))
             
         conn.commit()
@@ -265,20 +256,19 @@ def manage_vehicle(action, **kwargs):
         if action == 'add':
             plate = kwargs['plate']
             cur.execute("""
-                INSERT INTO vehicles (plate, brand, model, year, capacity_kg)
+                INSERT INTO vehicles (plate, brand, model, year, capacity_kg) 
                 VALUES (%s, %s, %s, %s, %s);
             """, (plate, kwargs['brand'], kwargs['model'], int(kwargs['year']), int(kwargs['capacity_kg'])))
             
         elif action == 'update':
             cur.execute("""
-                UPDATE vehicles
-                SET brand = %s, model = %s, year = %s, capacity_kg = %s
+                UPDATE vehicles 
+                SET brand = %s, model = %s, year = %s, capacity_kg = %s 
                 WHERE plate = %s;
             """, (kwargs['brand'], kwargs['model'], int(kwargs['year']), int(kwargs['capacity_kg']), plate))
             
         elif action == 'assign':
-            pilot_id = kwargs['pilot_id']
-            # Desasigna el vehículo a cualquier otro piloto antes de asignarlo al nuevo
+            pilot_id = kwargs['assign_pilot_id']
             cur.execute("UPDATE vehicles SET assigned_pilot_id = NULL WHERE assigned_pilot_id = %s;", (pilot_id,))
             cur.execute("UPDATE vehicles SET assigned_pilot_id = %s WHERE plate = %s;", (pilot_id, plate))
             
@@ -303,8 +293,8 @@ def load_pilot_data(driver_id):
     cur = conn.cursor(cursor_factory=RealDictCursor)
     
     cur.execute("""
-        SELECT
-            u.id, u.full_name, v.plate, v.brand, v.model
+        SELECT 
+            u.id, u.full_name, v.plate, v.brand, v.model 
         FROM users u
         LEFT JOIN vehicles v ON u.id = v.assigned_pilot_id
         WHERE u.id = %s;
@@ -319,7 +309,7 @@ def save_report_web(driver_id, header_data, checklist_results, observations, sig
     Guarda el reporte de inspección.
     Realiza una inserción en reports y una inserción masiva en detalles_inspeccion.
     """
-    if not signature_confirmation:
+    if signature_confirmation != 'confirmado':
         raise ValueError("Debe confirmar la inspección para guardar el reporte.")
 
     conn = get_db_connection()
@@ -339,6 +329,7 @@ def save_report_web(driver_id, header_data, checklist_results, observations, sig
         
     try:
         # 1. INSERTAR REGISTRO PRINCIPAL EN REPORTS y obtener el ID
+        # NOTA: report_date se incluye explícitamente con NOW() para evitar errores de restricción NOT NULL
         cur.execute("""
             INSERT INTO reports (
                 driver_id, vehicle_plate, km_actual, observations, header_data,
@@ -374,7 +365,8 @@ def save_report_web(driver_id, header_data, checklist_results, observations, sig
         conn.commit()
     except Exception as e:
         conn.rollback()
-        raise Exception(f"Error al guardar el reporte: {e}")
+        # Se lanza la excepción para que Flask la capture y muestre el error
+        raise Exception(f"Error al guardar el reporte: {e}") 
     finally:
         conn.close()
 
@@ -382,9 +374,8 @@ def save_report_web(driver_id, header_data, checklist_results, observations, sig
 def get_filtered_reports(start_date=None, end_date=None, pilot_id=None, plate=None):
     """Recupera reportes filtrados, usando pandas para la gestión de datos complejos."""
     if 'pd' not in globals():
-        # Si pandas no está instalado, devuelve una lista vacía y una advertencia
-        return []
-        
+         raise ImportError("La librería pandas no está instalada, no se pueden usar reportes filtrados.")
+         
     conn = get_db_connection()
     
     # Consulta principal: Une reports con users y subconsulta los detalles de la checklist.
@@ -427,6 +418,7 @@ def get_filtered_reports(start_date=None, end_date=None, pilot_id=None, plate=No
         
         # Deserialización JSONB
         if 'header_data' in df.columns:
+            # pd.read_sql_query devuelve strings para JSONB, necesitan deserialización
             df['header_data'] = df['header_data'].apply(lambda x: json.loads(x) if isinstance(x, str) else x)
         
         reports_list = df.to_dict('records')
