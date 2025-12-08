@@ -1,12 +1,11 @@
 import os
-# Importación corregida: Aseguramos importar 'timedelta'
 from datetime import datetime, timedelta 
 from flask import Flask, render_template, request, redirect, url_for, session, flash, jsonify, Response
 from functools import wraps
 from werkzeug.exceptions import HTTPException
 import pandas as pd
 import csv
-from io import StringIO # Importar StringIO para la exportación CSV
+from io import StringIO
 
 # Importar configuración y DB Manager
 import config
@@ -20,27 +19,31 @@ app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=1)
 # Lista de estados válidos normalizados para la validación
 ESTADOS_VALIDOS_NORMALIZADOS = ["Buen Estado", "Mal Estado", "N/A"]
 
-# --- Decoradores y Manejo de Sesión ---
+# --- Decoradores y Manejo de Sesión (CORREGIDO) ---
 
 def login_required(f):
     """Decorador para restringir el acceso a usuarios no logueados."""
     @wraps(f)
+    # CORRECCIÓN CLAVE: decorated_function DEBE aceptar *args y **kwargs
     def decorated_function(*args, **kwargs):
         if 'user_id' not in session:
             flash('Debes iniciar sesión para acceder a esta página.', 'warning')
             return redirect(url_for('login'))
         return f(*args, **kwargs)
-    return f(*args, **kwargs)
+    # CORRECCIÓN CLAVE: El decorador retorna la función envuelta
+    return decorated_function
     
 def role_required(role):
     """Decorador para restringir el acceso por rol (solo 'admin')."""
     def wrapper(f):
         @wraps(f)
+        # CORRECCIÓN CLAVE: decorated_function DEBE aceptar *args y **kwargs
         def decorated_function(*args, **kwargs):
             if 'role' not in session or session['role'] != role:
                 flash('Acceso denegado: Se requiere rol de Administrador.', 'danger')
                 return redirect(url_for('dashboard'))
             return f(*args, **kwargs)
+        # CORRECCIÓN CLAVE: El wrapper retorna la función envuelta
         return decorated_function
     return wrapper
 
@@ -81,7 +84,7 @@ def logout():
 @app.route('/')
 @login_required
 def dashboard():
-    """Ruta principal (endpoint 'dashboard'). CORRIGE el error 'home'."""
+    """Ruta principal (endpoint 'dashboard'). CORRIGE el error 'home' en templates."""
     if session.get('role') == 'admin':
         return redirect(url_for('admin_dashboard'))
     elif session.get('role') == 'piloto':
@@ -185,8 +188,7 @@ def pilot_form():
 @login_required
 @role_required('admin')
 def admin_dashboard():
-    """Panel principal de administración. Utiliza admin_base.html como dashboard."""
-    # CORRECCIÓN: Usa el nombre de archivo de tu estructura
+    """Panel principal de administración. Usa admin_base.html como dashboard (ajustado a tu estructura)."""
     return render_template('admin_base.html') 
 
 # --- Gestión de Usuarios ---
@@ -195,7 +197,7 @@ def admin_dashboard():
 @login_required
 @role_required('admin')
 def manage_users():
-    """Gestión de pilotos."""
+    """Gestión de pilotos. Usa admin_pilots.html (ajustado a tu estructura)."""
     if request.method == 'POST':
         action = request.form.get('action')
         user_id = request.form.get('user_id')
@@ -230,7 +232,6 @@ def manage_users():
         return redirect(url_for('manage_users'))
 
     pilots = db.get_all_pilots()
-    # CORRECCIÓN: Usa el nombre de archivo de tu estructura
     return render_template('admin_pilots.html', pilots=pilots)
 
 # --- Gestión de Vehículos ---
@@ -239,7 +240,7 @@ def manage_users():
 @login_required
 @role_required('admin')
 def manage_vehicles():
-    """Gestión y asignación de vehículos."""
+    """Gestión y asignación de vehículos. Usa admin_vehicles.html (ajustado a tu estructura)."""
     if request.method == 'POST':
         action = request.form.get('action')
         plate = request.form.get('plate')
@@ -279,7 +280,6 @@ def manage_vehicles():
 
     vehicles = db.get_all_vehicles()
     pilots = db.get_all_pilots()
-    # CORRECCIÓN: Usa el nombre de archivo de tu estructura
     return render_template('admin_vehicles.html', vehicles=vehicles, pilots=pilots)
 
 # --- Rutas de Reportes ---
@@ -288,7 +288,7 @@ def manage_vehicles():
 @login_required
 @role_required('admin')
 def view_reports():
-    """Muestra la lista de reportes de inspección con filtros."""
+    """Muestra la lista de reportes de inspección con filtros. Usa admin_reports.html."""
     start_date = request.args.get('start_date')
     end_date = request.args.get('end_date')
     pilot_id = request.args.get('pilot_id')
@@ -318,7 +318,6 @@ def view_reports():
     all_pilots = db.get_all_pilots()
     all_vehicles = db.get_all_vehicles()
     
-    # CORRECCIÓN: Usa el nombre de archivo de tu estructura
     return render_template('admin_reports.html', 
                            reports=reports, 
                            pilots=all_pilots, 
@@ -439,7 +438,7 @@ def export_csv():
 
 @app.errorhandler(404)
 def page_not_found(e):
-    # CORRECCIÓN: Busca '404.html' en la raíz de 'templates/'
+    # CORREGIDO: Llama a 404.html
     return render_template('404.html'), 404
 
 @app.errorhandler(Exception)
@@ -448,7 +447,7 @@ def handle_exception(e):
         return e
     
     app.logger.error(f"Error inesperado: {e}")
-    # CORRECCIÓN: Busca '500.html' en la raíz de 'templates/'
+    # CORREGIDO: Llama a 500.html
     return render_template('500.html', error=str(e)), 500
 
 # --- Inicialización y Ejecución ---
