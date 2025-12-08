@@ -6,16 +6,15 @@ from functools import wraps
 from werkzeug.exceptions import HTTPException
 import pandas as pd
 import csv
+from io import StringIO # Importar StringIO para la exportación CSV
 
 # Importar configuración y DB Manager
-# Asegúrate de que config.py y db_manager.py estén en el mismo directorio.
 import config
 import db_manager as db
 
 # --- Configuración de Flask ---
 app = Flask(__name__)
 app.secret_key = config.SECRET_KEY
-# CORRECCIÓN: Usar timedelta directamente desde el módulo importado.
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=1) 
 
 # Lista de estados válidos normalizados para la validación
@@ -31,8 +30,8 @@ def login_required(f):
             flash('Debes iniciar sesión para acceder a esta página.', 'warning')
             return redirect(url_for('login'))
         return f(*args, **kwargs)
-    return decorated_function
-
+    return f(*args, **kwargs)
+    
 def role_required(role):
     """Decorador para restringir el acceso por rol (solo 'admin')."""
     def wrapper(f):
@@ -45,7 +44,7 @@ def role_required(role):
         return decorated_function
     return wrapper
 
-# --- Rutas de Autenticación ---
+# --- Rutas de Autenticación y Dashboard ---
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
@@ -79,12 +78,10 @@ def logout():
     flash('Sesión cerrada exitosamente.', 'info')
     return redirect(url_for('login'))
 
-# --- Rutas Principales ---
-
 @app.route('/')
 @login_required
 def dashboard():
-    """Redirige al dashboard apropiado según el rol."""
+    """Ruta principal (endpoint 'dashboard'). CORRIGE el error 'home'."""
     if session.get('role') == 'admin':
         return redirect(url_for('admin_dashboard'))
     elif session.get('role') == 'piloto':
@@ -95,18 +92,12 @@ def dashboard():
 
 def normalize_item_name(item_name):
     """Normaliza el nombre del ítem para crear la clave consistente para la BD."""
-    # Coincide con la lógica de normalización usada en pilot_form.html
     return item_name.replace(' ', '_').replace('/', '_').replace('(', '').replace(')', '').replace(',', '').replace('-', '').replace('.', '')
 
 def validate_and_parse_checklist(form_data):
-    """
-    Valida que todos los ítems de la checklist hayan sido marcados y los estructura.
-    Retorna:
-        - checklist_results (dict): {item_completo: {'categoria': str, 'estado': str}}
-    """
+    """Valida que todos los ítems de la checklist hayan sido marcados y los estructura."""
     checklist_results = {}
     
-    # 1. Crear un mapa de normalizado -> (ítem completo, categoría)
     item_map = {}
     all_expected_keys = []
     for category, items in config.CHECKLIST_ITEMS:
@@ -115,22 +106,16 @@ def validate_and_parse_checklist(form_data):
             item_map[normalized_name] = (item, category)
             all_expected_keys.extend([f'check_{normalized_name}'])
             
-    # 2. Iterar sobre las claves esperadas y validar
     for expected_key in all_expected_keys:
         state = form_data.get(expected_key)
         
         if not state:
-            # Esto no debería ocurrir si el input tiene 'required' en HTML
             raise ValueError(f"Falta el estado de un ítem requerido: {expected_key}")
         
         if state not in ESTADOS_VALIDOS_NORMALIZADOS:
             raise ValueError(f"Estado inválido para {expected_key}: {state}")
 
-        # La clave en el formulario es 'check_normalized_name'. 
-        # Extraemos 'normalized_name' para buscar en item_map.
         normalized_name = expected_key.replace('check_', '')
-        
-        # Obtenemos el nombre completo y la categoría original
         full_item_name, category = item_map.get(normalized_name)
         
         checklist_results[full_item_name] = {
@@ -146,24 +131,20 @@ def pilot_form():
     """Muestra el formulario de inspección y maneja su envío."""
     driver_id = session.get('user_id')
     
-    # Cargar datos del piloto y vehículo asignado
     try:
         pilot_data = db.load_pilot_data(driver_id)
     except Exception as e:
         flash(f"Error al cargar datos de piloto/vehículo: {e}", 'danger')
         pilot_data = None
         
-    # Verificar si el piloto tiene vehículo asignado
     if not pilot_data or not pilot_data.get('plate'):
         flash('No tienes un vehículo asignado. No puedes realizar la inspección.', 'warning')
         return render_template('pilot_form.html', pilot_data=None, error="No hay vehículo asignado.")
 
     if request.method == 'POST':
         try:
-            # 1. Validar y parsear la Checklist
             checklist_results = validate_and_parse_checklist(request.form)
             
-            # 2. Preparar los datos de Encabezado (Header Data)
             header_data = {
                 'plate': pilot_data['plate'],
                 'km_actual': float(request.form['km_actual']),
@@ -177,11 +158,9 @@ def pilot_form():
                 'tarjeta_seguro': request.form['tarjeta_seguro'],
             }
             
-            # 3. Datos del Reporte (adicionales)
             observations = request.form.get('observations')
             signature_confirmation = request.form.get('signature_confirmation')
             
-            # 4. Guardar en la Base de Datos
             db.save_report_web(
                 driver_id=driver_id,
                 header_data=header_data,
@@ -198,7 +177,6 @@ def pilot_form():
         except Exception as e:
             flash(f'Error al guardar el reporte: {e}', 'danger')
 
-    # GET request
     return render_template('pilot_form.html', pilot_data=pilot_data, checklist=config.CHECKLIST_ITEMS)
 
 # --- Rutas de Administrador ---
@@ -207,8 +185,9 @@ def pilot_form():
 @login_required
 @role_required('admin')
 def admin_dashboard():
-    """Panel principal de administración."""
-    return render_template('admin/dashboard.html')
+    """Panel principal de administración. Utiliza admin_base.html como dashboard."""
+    # CORRECCIÓN: Usa el nombre de archivo de tu estructura
+    return render_template('admin_base.html') 
 
 # --- Gestión de Usuarios ---
 
@@ -251,7 +230,8 @@ def manage_users():
         return redirect(url_for('manage_users'))
 
     pilots = db.get_all_pilots()
-    return render_template('admin/manage_users.html', pilots=pilots)
+    # CORRECCIÓN: Usa el nombre de archivo de tu estructura
+    return render_template('admin_pilots.html', pilots=pilots)
 
 # --- Gestión de Vehículos ---
 
@@ -299,7 +279,8 @@ def manage_vehicles():
 
     vehicles = db.get_all_vehicles()
     pilots = db.get_all_pilots()
-    return render_template('admin/manage_vehicles.html', vehicles=vehicles, pilots=pilots)
+    # CORRECCIÓN: Usa el nombre de archivo de tu estructura
+    return render_template('admin_vehicles.html', vehicles=vehicles, pilots=pilots)
 
 # --- Rutas de Reportes ---
 
@@ -314,19 +295,13 @@ def view_reports():
     plate = request.args.get('plate')
     
     try:
-        # Se asume que get_filtered_reports ya maneja los filtros y devuelve la lista
         reports = db.get_filtered_reports(start_date, end_date, pilot_id, plate)
         
-        # Formatear la fecha para la visualización
         for report in reports:
-            # El campo report_date ya debería contener la hora de Guatemala gracias a db_manager.py
-            # Formateamos para que sea legible
             if report.get('report_date'):
-                # Si es un objeto datetime.datetime (de pandas), formatéalo.
                 if isinstance(report['report_date'], datetime):
                     report['report_date_str'] = report['report_date'].strftime('%Y-%m-%d %H:%M:%S')
                 else:
-                    # En caso de ser un string, intenta parsear y formatear.
                     try:
                         report_dt = datetime.fromisoformat(str(report['report_date']))
                         report['report_date_str'] = report_dt.strftime('%Y-%m-%d %H:%M:%S')
@@ -343,7 +318,8 @@ def view_reports():
     all_pilots = db.get_all_pilots()
     all_vehicles = db.get_all_vehicles()
     
-    return render_template('admin/view_reports.html', 
+    # CORRECCIÓN: Usa el nombre de archivo de tu estructura
+    return render_template('admin_reports.html', 
                            reports=reports, 
                            pilots=all_pilots, 
                            vehicles=all_vehicles,
@@ -387,10 +363,6 @@ def export_csv():
             flash('No hay datos para exportar con los filtros seleccionados.', 'info')
             return redirect(url_for('view_reports', **request.args))
             
-        # Importar StringIO aquí para asegurar que solo se necesite si la ruta se accede
-        from io import StringIO
-
-        # Preparar encabezados estáticos y dinámicos (Checklist)
         static_headers = [
             'ID Reporte', 'Fecha Reporte (Guatemala)', 'Piloto', 'Placa', 
             'KM Actual', 'KM Próximo Servicio', 'Fecha Servicio Anterior', 
@@ -398,7 +370,6 @@ def export_csv():
             'Tipo Licencia', 'Vencimiento Licencia', 'Tarjeta Seguro', 'Observaciones'
         ]
         
-        # Generar lista de todos los ítems posibles de la checklist como encabezados dinámicos
         checklist_headers = []
         for _, items in config.CHECKLIST_ITEMS:
             checklist_headers.extend(items)
@@ -406,18 +377,14 @@ def export_csv():
         all_headers = static_headers + checklist_headers
         
         def generate():
-            # Crear un buffer CSV en memoria
             csv_buffer = StringIO()
             writer = csv.DictWriter(csv_buffer, fieldnames=all_headers)
             writer.writeheader()
 
             for report in reports:
                 row = {}
-                
-                # 1. Datos estáticos
                 row['ID Reporte'] = report.get('id', '')
                 
-                # Formatear la fecha para el CSV
                 report_date = report.get('report_date')
                 if isinstance(report_date, datetime):
                     row['Fecha Reporte (Guatemala)'] = report_date.strftime('%Y-%m-%d %H:%M:%S')
@@ -437,7 +404,6 @@ def export_csv():
                 
                 row['Observaciones'] = report.get('observations', '')
                 
-                # 2. Datos del Encabezado (JSONB)
                 header_data = report.get('header_data', {})
                 row['Marca Promoción'] = header_data.get('promo_marca', '')
                 row['Fecha Inicio Promoción'] = header_data.get('fecha_inicio', '')
@@ -446,22 +412,18 @@ def export_csv():
                 row['Vencimiento Licencia'] = header_data.get('vencimiento_licencia', '')
                 row['Tarjeta Seguro'] = header_data.get('tarjeta_seguro', '')
                 
-                # 3. Datos Dinámicos (Checklist)
                 checklist_map = {item['item']: item['estado'] for item in report.get('checklist_details', [])}
                 
                 for item_name in checklist_headers:
-                    # El valor por defecto es 'No Registrado' si el ítem no se encuentra, aunque no debería ocurrir.
                     row[item_name] = checklist_map.get(item_name, 'No Registrado')
                     
                 writer.writerow(row)
                 
-                # Enviar el contenido del buffer y limpiarlo para el siguiente
                 yield csv_buffer.getvalue()
                 csv_buffer.seek(0)
                 csv_buffer.truncate(0)
 
             
-        # Preparar respuesta de descarga
         now = datetime.now().strftime('%Y%m%d_%H%M%S')
         filename = f"reporte_inspeccion_{now}.csv"
         
@@ -477,31 +439,27 @@ def export_csv():
 
 @app.errorhandler(404)
 def page_not_found(e):
+    # CORRECCIÓN: Busca '404.html' en la raíz de 'templates/'
     return render_template('404.html'), 404
 
 @app.errorhandler(Exception)
 def handle_exception(e):
-    # Pasa la excepción original para logging o debug
     if isinstance(e, HTTPException):
         return e
     
-    # Manejar errores de DB o generales
     app.logger.error(f"Error inesperado: {e}")
+    # CORRECCIÓN: Busca '500.html' en la raíz de 'templates/'
     return render_template('500.html', error=str(e)), 500
 
 # --- Inicialización y Ejecución ---
 
 if __name__ == '__main__':
-    # Inicializar la base de datos al inicio
     try:
         db.inicializar_db()
         print("Base de datos inicializada/verificada.")
     except ConnectionError as e:
         print(f"Error CRÍTICO al conectar/inicializar la DB: {e}")
-        # Considerar si se debe detener la app aquí
-        pass
     except Exception as e:
         print(f"Error desconocido durante la inicialización de la DB: {e}")
-        pass
         
     app.run(debug=True)
